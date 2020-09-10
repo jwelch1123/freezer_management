@@ -1,0 +1,4 @@
+﻿Date_Added_YYMMDD,Type,PB_Number,Bag Number,Unique Bag ID,Weight,Material_type,Strain,Operator,Freezer_ID,Shelf_Number,Purpose
+200704,Entry,PB000001,1,PB000001_1,1000,Pellet,PP00,James,Mini-fridge,3,Entry
+200705,Removal,PB000001,1,PB000001_1,500,Pellet,PP00,James,Mini-fridge,3,Experiment
+200705,Balance,PB000001,1,PB000001_1,500,Pellet,PP00,James,Mini-fridge,3,
