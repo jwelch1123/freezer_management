@@ -1,4 +1,9 @@
-﻿Date_Added_YYMMDD,Type,PB_Number,Bag Number,Unique Bag ID,Weight,Material_type,Strain,Operator,Freezer_ID,Shelf_Number,Purpose
-200704,Entry,PB000001,1,PB000001_1,1000,Pellet,PP00,James,Mini-fridge,3,Entry
-200705,Removal,PB000001,1,PB000001_1,500,Pellet,PP00,James,Mini-fridge,3,Experiment
-200705,Balance,PB000001,1,PB000001_1,500,Pellet,PP00,James,Mini-fridge,3,
+"Date_Added","Type","PB_Number","Bag.Number","Unique.Bag.ID","Weight","Material_type","Strain","Operator","Freezer_ID","Shelf_Number","Purpose"
+"07/04/20","Entry","PB000001",1,"PB000001_1",1000,"Pellet","PP00","James","Mini-fridge",3,"Entry"
+"07/04/20","Removal","PB000001",1,"PB000001_1",500,"Pellet","PP00","James","Mini-fridge",3,"Experiment"
+"07/05/20","Balance","PB000001",1,"PB000001_1",500,"Pellet","PP00","James","Mini-fridge",3,NA
+"09/13/20","Entry","PB__-",1,"PB__-_1",1,"Pellet",NA,NA,NA,1,"Hello"
+NA,"Entry",NA,1,"_1",1,"Pellet",NA,NA,NA,1,"test date saved as character"
+"09/14/20","Entry",NA,1,"_1",1,"Pellet",NA,NA,NA,1,"another test, as.character used"
+"09/15/20","Entry",NA,1,"_1",1,"Pellet",NA,NA,NA,1,"saving submission list as ... a list"
+"09/12/20","Entry","",1,"_1",1,"Pellet","","","",1,"added as.char to rbind function, "

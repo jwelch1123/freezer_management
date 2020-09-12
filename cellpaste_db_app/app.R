@@ -3,16 +3,8 @@ library(shiny)
 library(tidyverse)
 library(DT)
 
-#fields to save when updating database
-submission_list <- c("date_action","mod_type","batch_id","bag_number",
-                     paste0("batch_id","_","bag_number"),
-                     "sample_weight","material_type","operator_name",
-                     "freezer_name","shelf_number","reason")
 
-
-
-
-
+# Shiny App UI ####
 # Define UI for application that draws a histogram
 ui <- fluidPage(
 
@@ -48,6 +40,9 @@ ui <- fluidPage(
                           radioButtons(inputId = "material_type",
                                        label = "Type of Material",
                                        choices = c("Pellet","Ferm-Sup")),
+                          
+                          textInput(inputId = "strain_id",
+                                    label = "Strain ID (PP##)"),
 
                           textInput(inputId = "operator_name",
                                     label = "Operator Name"),
@@ -76,6 +71,7 @@ ui <- fluidPage(
     #https://deanattali.com/2015/06/14/mimicking-google-form-shiny/
     
 
+# Shiny App Server ####
 # Define server logic required to draw a histogram
 server <- function(input, output, session) {
     #ends app run when page is closed in browser
@@ -83,19 +79,34 @@ server <- function(input, output, session) {
     #https://stackoverflow.com/questions/35306295/how-to-stop-running-shiny-app-by-closing-the-browser-window
     onSessionEnded(function() {stopApp()})
     
+    #Import statement ####
     cell_db <- read_csv("./app_demo_data.csv") %>% 
-        transform(Date_Added_YYMMDD = as.Date.character(Date_Added_YYMMDD,"%y%m%d"))
+        transform(Date_Added = as.Date(Date_Added,"%m/%d/%y"))
     
     output$cell_db_table <- DT::renderDataTable(cell_db)
     
-    
-    
+    #Save the database entry ####
     #observe event and save data to new row and re-save dataframe
     observeEvent(input$upload_entry,{
-    transistion_db <- rbind(cell_db, submission_list)
-    write.csv(transistion_db, file = "./app_demo_data.csv")
+        
+        #c() is wrong, it coerses the same class for all values
+        submission_list <- list(input$date_action,
+                             input$mod_type,
+                             input$batch_id,
+                             input$bag_number,
+                             paste0(input$batch_id,"_",input$bag_number),
+                             input$sample_weight,
+                             input$material_type,
+                             input$strain_id,
+                             input$operator_name,
+                             input$freezer_name,
+                             input$shelf_number,
+                             input$reason)
+
+        transistion_db <- rbind(cell_db, submission_list) %>% 
+            transform(Date_Added = as.character(Date_Added,"%m/%d/%y"))
+        write.csv(transistion_db, file = "./app_demo_data.csv", row.names = F)
     })
-    #this doesnt work yet.
 
 }
 
