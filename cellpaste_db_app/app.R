@@ -28,7 +28,13 @@ ui <- fluidPage(
                                     format = "yymmdd"),
 
                           textInput(inputId = "batch_id",
-                                    label = "Batch ID (PB######-SU1,2,3)"),
+                                    label = "Batch ID (PB######)"), #FLAG
+                          
+                          checkboxGroupInput(inputId = "input_su_checkboxes",
+                                             label = "Select Relavent SU units",
+                                             choiceNames = paste0("SU",1:6),
+                                             choiceValues = 1:6,
+                                             inline = T),
 
                           numericInput(inputId = "bag_number",
                                        label = "Bag Number",
@@ -47,8 +53,12 @@ ui <- fluidPage(
                           textInput(inputId = "strain_id",
                                     label = "Strain ID (PP##)"),
 
-                          textInput(inputId = "operator_name",
-                                    label = "Operator Name"),
+                          selectizeInput(inputId = "operator_name",
+                                    label = "Operator Name",
+                                    choices = NULL,
+                                    selected = NULL,
+                                    options = list( create = TRUE,
+                                                    createOnBlur = TRUE)),
 
                           textInput(inputId = "freezer_name",
                                     label = "Freezer Name"),
@@ -56,9 +66,6 @@ ui <- fluidPage(
                                         label = "Shelf from Top (top = 1)",
                                         value = 1,
                                         min = 1),
-
-                          textInput(inputId = "reason",
-                                     label = "Reason"),
                           br(),
                           br(),
                           actionButton(inputId = "upload_entry",
@@ -68,20 +75,42 @@ ui <- fluidPage(
                           ), 
                  
                  tabPanel("Batch Modification", 
-                          dateInput(inputId = "date_action",
+                          dateInput(inputId = "mod_date_action",
                                     label = "Date of Action",
                                     format = "yymmdd"),
                           
                           selectInput(inputId = "mod_type",
                                       label = "Type of Change",
-                                      c("Removal","Set Balance"),
+                                      c("Removal","Set Balance"), #change?
                                       selected = "Removal"),
                           
-                          selectizeInput(inputId = "unique_batch_id",
+                          selectizeInput(inputId = "mod_unique_batch_id",
                                          label = "Unique Batch ID (PB + bag #)",
                                          choices = NULL,
-                                         selected = NULL)
-                                        
+                                         selected = NULL),
+                          
+                          numericInput(inputId = "mod_value_change",
+                                      label = "How much is removed? (g)",
+                                      value = 0),
+                          
+                          selectizeInput(inputId = "mod_operator",
+                                      label = "Operator preforming action",
+                                      choices = NULL,
+                                      selected = NULL,
+                                      options = list( create = TRUE,
+                                                      createOnBlur = TRUE) ),
+                          
+                          textInput(inputId = "mod_reason",
+                                      label = "Reason for Change",
+                                      value = ""),
+                          
+                          checkboxInput(inputId = "mod_remove_unique_id",
+                                      label = "Should this Unique bag be removed?",
+                                      value = FALSE),
+                          br(),
+                          br(),
+                          actionButton(inputId = "mod_update_entry",
+                                       label = "Submit Change to Database"),                          
                           ),
                 
                  tabPanel("graphics","contents")
@@ -115,14 +144,14 @@ server <- function(input, output, session) {
     output$ledger_db_table <- DT::renderDataTable(ledger_db)
     
     
-    #Material Entry update ####
+    # Entry update ####
     #observe event and save data to new row and re-save dataframe
     observeEvent(input$upload_entry,{
         
         #c() is wrong, it coerses the same class for all values
         ledger_update_list <- list(input$date_action,
                              "Entry",
-                             input$batch_id,
+                             paste0(input$batch_id,"_SU",input$input_su_checkboxes),
                              input$bag_number,
                              paste0(input$batch_id,"_",input$bag_number),
                              input$sample_weight,
@@ -144,7 +173,7 @@ server <- function(input, output, session) {
                                       input$bag_number,
                                       input$strain_id,
                                       input$material_type,
-                                      input$sample_weight, #needs update
+                                      input$sample_weight, 
                                       input$freezer_name,
                                       input$shelf_number)        
 
@@ -159,26 +188,60 @@ server <- function(input, output, session) {
     
     })
     
-    # Mod Update ####
-    # observeEvent(input$upload_modification,{
-    #     inventory_update_list <- list(input$date_action,
-    #                                   paste0(input$batch_id,"_",input$bag_number),
-    #                                   input$batch_id,
-    #                                   input$bag_number,
-    #                                   input$strain_id,
-    #                                   input$material_type,
-    #                                   input$sample_weight, #needs update
-    #                                   input$freezer_name,
-    #                                   input$shelf_number)
-    # 
-    # 
-    # })
+    # Modification Update ####
+    observeEvent(input$mod_update_entry,{
+        
+        # CURRENT ISSUE ####
+        
+        #get row with matching mod_unique_batch_id
+        inventory_update_row <- inventory_db %>%  
+                            filter(., inventory_db$Unique_Bag_ID == input$mod_unique_batch_id) %>% 
+                            split(., seq(nrow(.)))
+        ledger_update_row <- ledger_db %>% 
+                            filter(., inventory_db$Unique_Bag_ID == input$mod_unique_batch_id) %>% 
+                            split(., seq(nrow(.)))
+        
+        # If removing, drop row and change ledger value to negative of weight
+        # If not removing, update the inventory values, bind to inventory db, and update ledger weight.
+        if({input$mod_remove_unique_id}){ 
+            inventory_db <- inventory_db %>% subset(.,Unique_Bag_ID != input$mod_unique_batch_id)
+            ledger_update_row[6] = 0 - ledger_update_row[6]
+            
+        } else{
+            inventory_update_row[1] = input$mod_date_action
+            inventory_update_row[7] = inventory_update_row[7] - input$mod_value_change
+            
+            inventory_db <- inventory_db %>% subset(.,Unique_Bag_ID != input$mod_unique_batch_id)
+            inventory_db <- rbind(inventory_db, inventory_update_row)
+            
+            ledger_update_row[6] = ledger_update_row[6] - input$mod_value_change
+        }
+        
+        # Update ledger values and bind row to dataframe: happens even no matter the change.
+        ledger_update_row[1] = input$mod_date_action
+        ledger_update_row[9] = input$operator
+        ledger_update_row[12] = input$mod_reason
+        ledger_db <- rbind(ledger_db, ledger_update_row)
+
+        # Write inventory and ledger to CSV files
+        write.csv(inventory_db, file = "./app_inventory.csv", row.names = F)
+        write.csv(ledger_db, file = "./app_ledger.csv", row.names = F)
+        
+        session$reload()
+    })
     
-    # Selectize Updates
-    
-    #unique_batches <- updateSelectizeInput(session, "unique_batch_id", choices = inventory_db$Unique_Bag_ID)
-    updateSelectizeInput(session, "unique_batch_id", 
+    # Selectize Updates ####
+    # list of inventory batches
+    updateSelectizeInput(session, "mod_unique_batch_id", 
                          choices = inventory_db$Unique_Bag_ID, 
+                         selected = "", server = TRUE)
+    # Names for batch changes
+    updateSelectizeInput(session, "mod_operator", 
+                         choices = ledger_db$Operator, 
+                         selected = "", server = TRUE)
+    # Names for batch additions
+    updateSelectizeInput(session, "operator_name", 
+                         choices = ledger_db$Operator, 
                          selected = "", server = TRUE)
 }
 
