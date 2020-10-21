@@ -191,36 +191,46 @@ server <- function(input, output, session) {
     # Modification Update ####
     observeEvent(input$mod_update_entry,{
         
-        # CURRENT ISSUE ####
+        # issue ####
+        # need to check for unique bag ID before assigniing
+        if(input$mod_unique_batch_id == ""){
+            session$reload()
+        }
         
-        #get row with matching mod_unique_batch_id
-        inventory_update_row <- inventory_db %>%  
+        inventory_update_row <- (inventory_db %>%  
                             filter(., inventory_db$Unique_Bag_ID == input$mod_unique_batch_id) %>% 
-                            split(., seq(nrow(.)))
-        ledger_update_row <- ledger_db %>% 
+                            split(., seq(nrow(.))))[[1]]
+        ledger_update_row <- (ledger_db %>% 
                             filter(., inventory_db$Unique_Bag_ID == input$mod_unique_batch_id) %>% 
-                            split(., seq(nrow(.)))
+                            split(., seq(nrow(.))))[[1]]
         
         # If removing, drop row and change ledger value to negative of weight
         # If not removing, update the inventory values, bind to inventory db, and update ledger weight.
         if({input$mod_remove_unique_id}){ 
             inventory_db <- inventory_db %>% subset(.,Unique_Bag_ID != input$mod_unique_batch_id)
-            ledger_update_row[6] = 0 - ledger_update_row[6]
+            ledger_update_row$Weight = 0 - ledger_update_row$Weight
             
         } else{
-            inventory_update_row[1] = input$mod_date_action
-            inventory_update_row[7] = inventory_update_row[7] - input$mod_value_change
+            inventory_update_row$Date_Modified = input$mod_date_action
+            inventory_update_row$Weight = inventory_update_row$Weight - input$mod_value_change
             
             inventory_db <- inventory_db %>% subset(.,Unique_Bag_ID != input$mod_unique_batch_id)
             inventory_db <- rbind(inventory_db, inventory_update_row)
             
-            ledger_update_row[6] = ledger_update_row[6] - input$mod_value_change
+            ledger_update_row$Weight = ledger_update_row$Weight - input$mod_value_change
         }
         
         # Update ledger values and bind row to dataframe: happens even no matter the change.
-        ledger_update_row[1] = input$mod_date_action
-        ledger_update_row[9] = input$operator
-        ledger_update_row[12] = input$mod_reason
+        ledger_update_row$Date_Added = input$mod_date_action
+        ledger_update_row$Operator = input$mod_operator
+        ledger_update_row$Purpose = input$mod_reason
+        print('ledger_db')
+        print(ncol(ledger_db))
+        print(head(ledger_db))
+        print("ledger_update_row")
+        print(length(ledger_update_row))
+        print(ledger_update_row)
+        
         ledger_db <- rbind(ledger_db, ledger_update_row)
 
         # Write inventory and ledger to CSV files
