@@ -135,11 +135,12 @@ ui <- fluidPage(
 
                           selectizeInput(inputId = "s_overview_strain_id",
                                          label = "Select Strain to View",
-                                         choices = NULL#,
-                                         #selected = 
+                                         choices = NULL,
+                                         selected = NULL
                                              ),
                           dateRangeInput(inputId = "s_overview_daterange",
                                          label = "Select a Date Range to View"),
+                          
                           plotOutput(outputId = "strain_overview_plot"),
                           
                           br(),
@@ -311,18 +312,28 @@ server <- function(input, output, session) {
                          choices = ledger_db$Strain, 
                          selected = "", server = TRUE)
     
-    # Strain Overview ####
+    # Strain Overview Graphics ####
     # current Issue ####
-    # selecting strain breaks thing, needs a date filter.
-    observeEvent(input$s_overview_strain_id,{
+    #Set start and end dates for strain based on ledger
+    observeEvent(c(input$s_overview_strain_id , input$s_overview_daterange), {
         strain_overview_ggplot <- ledger_db %>% 
-            filter(., ledger_db$Strain == input$s_overview_strain_id) %>% 
-            filter(., !is.na(ledger_db$Date_Added)  || !is.na(ledger_db$Weight)) %>% 
-            ggplot(., aes(x=ledger_db$Date_Added, y = ledger_db$Weight)) +
-            geom_col(stat='identity') +
-            labs(title = "Production of Strain __todo___",
-                 xlab = "Cell Mass Changes",
-                 ylab = "Date Of Modification")
+            rowwise() %>% 
+            mutate(., running_tally = 
+                       if(Type == "Entry"){
+                           Weight * 1
+                       } else if(Type =="Removal") {
+                           Weight * -1
+                       } else {0}) %>% 
+            filter(., Type != "Balance") %>% 
+            filter(., Date_Added >= input$s_overview_daterange[1] & 
+                       Date_Added <= input$s_overview_daterange[2]) %>% 
+            filter(., Strain == input$s_overview_strain_id) %>% 
+            ggplot(., aes(x=Date_Added, y = running_tally, fill = Type)) +
+            geom_col() +
+            scale_fill_brewer(palette = "Dark2") +
+            labs(title = paste0("Production History of ",input$s_overview_strain_id),
+                 x = "Cell Mass Changes",
+                 y = "Date Of Modification")
 
         output$strain_overview_plot <- renderPlot(strain_overview_ggplot)
         
