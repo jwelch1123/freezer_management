@@ -5,21 +5,19 @@ library(DT)
 library(ggplot2)
 
 # Shiny App UI ####
-# Define UI for application that draws a histogram
 ui <- fluidPage(
-
-    # Panels ####
     titlePanel("Cell Paste Database"),
     
-                # Inventory ####
-    tabsetPanel( tabPanel("Current Inventory", 
+    tabsetPanel( 
+                 # Inventory & Ledger ####
+                 tabPanel("Inventory & Ledger", 
                           mainPanel(
-                              dataTableOutput("inventory_db_table"))
-                          ), 
-                # Ledger #### 
-                tabPanel("Overall Ledger", 
-                          mainPanel(
-                              dataTableOutput("ledger_db_table"))
+                              selectInput(inputId = "table_type",
+                                          label = "Select table to View: ",
+                                          choices = c("Current Inventory", "Overall Ledger"),
+                                          selected = "Current Inventory"),
+                              dataTableOutput("selected_table")
+                              )
                           ), 
                  # Batch Input ####
                  tabPanel("New Batch Input", 
@@ -167,12 +165,17 @@ server <- function(input, output, session) {
         transform(Date_Added = as.Date(Date_Added, "%m/%d/%y"))
     
     # Render Tables ####
-    output$inventory_db_table <- DT::renderDataTable(inventory_db)
-    output$ledger_db_table <- DT::renderDataTable(ledger_db)
+    observeEvent(input$table_type, {
+        output$selected_table <- DT::renderDataTable({
+            if(input$table_type == "Current Inventory"){
+                inventory_db
+            } else if (input$table_type == "Overall Ledger"){
+                ledger_db
+            }  })
+    })
     
     
     # Entry update ####
-    #observe Batch Addition and save data to new row and re-save dataframe
     observeEvent(input$upload_entry,{
         
         ledger_update_list <- list(input$date_action,
@@ -315,6 +318,7 @@ server <- function(input, output, session) {
     # Strain Overview Graphics ####
     # current Issue ####
     #Set start and end dates for strain based on ledger
+    # need to make start dates selectized based on strain picked.
     observeEvent(c(input$s_overview_strain_id , input$s_overview_daterange), {
         strain_overview_ggplot <- ledger_db %>% 
             rowwise() %>% 
