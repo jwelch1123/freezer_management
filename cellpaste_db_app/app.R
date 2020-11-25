@@ -142,7 +142,7 @@ ui <- fluidPage(
                           plotOutput(outputId = "strain_overview_plot"),
                           
                           br(),
-                          "ending Text"
+                          #add a table view here if selected.
                           ),
                  tabPanel("Batch Overview","Explore by Batch, see all modifications, current inventory and ledger"),
                  tabPanel("Search","Bring up all information on selected batches")
@@ -157,7 +157,7 @@ ui <- fluidPage(
 
 # Shiny App Server ####
 server <- function(input, output, session) {
-    #Inport statements ####
+    # Inport statements ####
     inventory_db <- read_csv("./app_inventory.csv") %>% 
         transform(Date_Modified = as.Date(Date_Modified,"%m/%d/%y"))
     
@@ -316,10 +316,81 @@ server <- function(input, output, session) {
                          selected = "", server = TRUE)
     
     # Strain Overview Graphics ####
-    # current Issue ####
-    #Set start and end dates for strain based on ledger
-    # need to make start dates selectized based on strain picked.
+
+    
+    
+    
+    # observeEvent(input$s_overview_strain_id,{
+    #     s_startdate <- ledger_db %>% 
+    #         rowwise() %>% 
+    #         mutate(., running_tally = 
+    #                    if(Type == "Entry"){
+    #                        Weight * 1
+    #                    } else if(Type =="Removal") {
+    #                        Weight * -1
+    #                    } else {0}) %>% 
+    #         ungroup() %>% 
+    #         filter(., Type != "Balance") %>% 
+    #         select(., Date_Added) %>% 
+    #         slice_min(.,Date_Added, n=1, with_ties = FALSE) %>% 
+    #         pull()
+    #     
+    #     s_enddate <-ledger_db %>% 
+    #         rowwise() %>% 
+    #         mutate(., running_tally = 
+    #                    if(Type == "Entry"){
+    #                        Weight * 1
+    #                    } else if(Type =="Removal") {
+    #                        Weight * -1
+    #                    } else {0}) %>% 
+    #         ungroup() %>% 
+    #         filter(., Type != "Balance") %>% 
+    #         select(., Date_Added) %>% 
+    #         slice_max(.,Date_Added, n=1, with_ties= FALSE) %>% 
+    #         pull()
+    #     
+    #     updateDateRangeInput(session, "s_overview_daterange",
+    #                          start = s_startdate, 
+    #                          end = s_enddate)
+    # })
+    
     observeEvent(c(input$s_overview_strain_id , input$s_overview_daterange), {
+        
+        #start insert
+        s_startdate <- ledger_db %>% 
+            rowwise() %>% 
+            mutate(., running_tally = 
+                       if(Type == "Entry"){
+                           Weight * 1
+                       } else if(Type =="Removal") {
+                           Weight * -1
+                       } else {0}) %>% 
+            ungroup() %>% 
+            filter(., Type != "Balance") %>% 
+            select(., Date_Added) %>% 
+            slice_min(.,Date_Added, n=1, with_ties = FALSE) %>% 
+            pull()
+        
+        s_enddate <-ledger_db %>% 
+            rowwise() %>% 
+            mutate(., running_tally = 
+                       if(Type == "Entry"){
+                           Weight * 1
+                       } else if(Type =="Removal") {
+                           Weight * -1
+                       } else {0}) %>% 
+            ungroup() %>% 
+            filter(., Type != "Balance") %>% 
+            select(., Date_Added) %>% 
+            slice_max(.,Date_Added, n=1, with_ties= FALSE) %>% 
+            pull()
+        # end insert
+        
+        
+        
+        
+        
+        
         strain_overview_ggplot <- ledger_db %>% 
             rowwise() %>% 
             mutate(., running_tally = 
@@ -329,11 +400,14 @@ server <- function(input, output, session) {
                            Weight * -1
                        } else {0}) %>% 
             filter(., Type != "Balance") %>% 
-            filter(., Date_Added >= input$s_overview_daterange[1] & 
-                       Date_Added <= input$s_overview_daterange[2]) %>% 
+            #filter(., Date_Added >= input$s_overview_daterange[1] & 
+            #           Date_Added <= input$s_overview_daterange[2]) %>% 
+            filter(., Date_Added >= s_startdate & 
+                       Date_Added <= s_enddate) %>% 
+            
             filter(., Strain == input$s_overview_strain_id) %>% 
             ggplot(., aes(x=Date_Added, y = running_tally, fill = Type)) +
-            geom_col() +
+            geom_col(width = 0.9) +
             scale_fill_brewer(palette = "Dark2") +
             labs(title = paste0("Production History of ",input$s_overview_strain_id),
                  x = "Cell Mass Changes",
@@ -345,7 +419,7 @@ server <- function(input, output, session) {
     })
     
     
-    
+    # Notes #### 
          #take the ledger data table
     #graph with line for current amount at that time, and bar for inputs/outputs?
         # filter for date and strain
