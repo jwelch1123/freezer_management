@@ -124,10 +124,8 @@ ui <- navbarPage(
                       actionButton(inputId = "mod_update_entry",
                                    label = "Submit Change to Database")                          
                       ),
-             # Graphics ####
-             
-             tabPanel("Strain Overview","By Strain, look at current stored batchs. Looks at overall production, 
-                      pie chart of usage by group. ",
+             # Strain Overview ####
+             tabPanel("Strain Overview",
                       fluidRow(
                           column( width = 4,
                               selectizeInput(inputId = "s_overview_strain_id",
@@ -141,9 +139,10 @@ ui <- navbarPage(
                                     value = FALSE)
                                 ),
                           column( width = 3,
-                                  checkboxInput(inputId = "s_show_op",
-                                                label = "Strain usage by Operator",
-                                                value = FALSE)
+                                  selectInput(inputId = "s_show_other",
+                                                label = "Strain usage by:",
+                                                choices = c("Operator_Group","Operator","Location") ,
+                                                selected = "Operator_Group")
                                 )
                           ),
                       fluidRow(
@@ -153,13 +152,28 @@ ui <- navbarPage(
                           column(width = 4,
                                 plotOutput(outputId = "strain_usage_plot"))
                       ),
-                      
-                      
                       br(),
                       dataTableOutput("s_strainledgertable")
                       ),
-             tabPanel("Batch Overview","Explore by Batch, see all modifications, current inventory and ledger"),
-             tabPanel("Search","Bring up all information on selected batches")
+    
+             # Batch Overview ####
+             tabPanel("Batch Overview","Explore by Batch, see all modifications, current inventory and ledger",
+                      fluidRow(column(width = 2,
+                                      selectizeInput(inputId = "b_batch_id",
+                                                     label = "Select Batch to View",
+                                                     choices = NULL,
+                                                     selected = NULL)),
+                               column(width = 5), # Number of Bags | Remaining Weight
+                               column(width = 5)), # Number of Freezer/Thaws
+                      
+                      fluidRow() #show input / output history for batch. 
+                      ),
+             
+    
+    
+    
+    
+            tabPanel("Search","Bring up all information on selected batches, find what you are looking for")
              
 )
 
@@ -323,45 +337,18 @@ server <- function(input, output, session) {
     updateSelectizeInput(session, "mod_op_group",
                          choices = ledger_db$Operator_Group,
                          selected ="", server = TRUE)
-    
     #Strains for Overview Graph
     updateSelectizeInput(session, "s_overview_strain_id", 
                          choices = ledger_db$Strain, 
                          selected = "", server = TRUE)
+    #Batches for Batches Page
+    updateSelectInput(session, "b_batch_id",
+                      choices = ledger_db$PB_Number,
+                      selected = "")
     
     # Strain Overview Graphics ####
     
-    observeEvent(input$s_overview_strain_id, {
-        
-        # s_startdate <- ledger_db %>% 
-        #     rowwise() %>% 
-        #     mutate(., Running_Tally = 
-        #                if(Type == "Entry"){
-        #                    Weight * 1
-        #                } else if(Type =="Removal") {
-        #                    Weight * -1
-        #                } else {0}) %>% 
-        #     ungroup() %>% 
-        #     filter(., Strain == input$s_overview_strain_id) %>% 
-        #     filter(., Type != "Balance") %>% 
-        #     select(., Date_Added) %>% 
-        #     slice_min(.,Date_Added, n=1, with_ties = FALSE) %>% 
-        #     pull()
-        # 
-        # s_enddate <-ledger_db %>% 
-        #     rowwise() %>% 
-        #     mutate(., Running_Tally = 
-        #                if(Type == "Entry"){
-        #                    Weight * 1
-        #                } else if(Type =="Removal") {
-        #                    Weight * -1
-        #                } else {0}) %>% 
-        #     ungroup() %>% 
-        #     filter(., Strain == input$s_overview_strain_id) %>% 
-        #     filter(., Type != "Balance") %>% 
-        #     select(., Date_Added) %>% 
-        #     slice_max(.,Date_Added, n=1, with_ties= FALSE) %>% 
-        #     pull()
+    observeEvent(c(input$s_overview_strain_id, input$s_show_other), {
 
         strain_overview_ggplot <- ledger_db %>% 
             rowwise() %>% 
@@ -382,20 +369,29 @@ server <- function(input, output, session) {
         
         output$strain_overview_plot <- renderPlot(strain_overview_ggplot)
         
+
+        
+        
         strain_usage_ggplot <- ledger_db %>% 
             filter(., Type != "Balance") %>% 
             filter(., Strain == input$s_overview_strain_id) %>% 
-            filter(., !is.na(Operator_Group)) %>% 
-            ggplot(., aes(x= Strain, fill = Operator_Group)) +
-            geom_bar(stat = "count", width = 0.9) +
+            filter(., !is.na(Operator_Group)) %>%
+            mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_")) %>%
+            ggplot(., aes(x= Strain, fill = get(input$s_show_other))) +
+            geom_bar(stat = "count", width = 0.5) +
             scale_fill_brewer(palette = "Set2") +
-            labs(title = paste0("Usage of ", input$s_overview_strain_id," by Group"),
+            labs(title = paste0("Usage of ", input$s_overview_strain_id," by ", input$s_show_other),
                  x = input$s_overview_strain_id,
-                 y = "Usage by Group")
+                 y = paste0("Usage by ", input$s_show_other))
         
         output$strain_usage_plot <- renderPlot((strain_usage_ggplot))
         
     })
+    
+
+    
+    
+    
     
     observeEvent(input$s_showtable,{
         output$s_strainledgertable <- DT::renderDataTable({
@@ -413,8 +409,10 @@ server <- function(input, output, session) {
     })
     
     # Issues ####
-        # add by user for strain graph (to top?)
-    
+        # Add infobox / valuebox for strain usage
+        #need to attach shinydashboard
+        # would this look weird?
+        # Reference shinyTopics folder.
     # Notes #### 
         #take the ledger data table
         #graph with line for current amount at that time, and bar for inputs/outputs?
