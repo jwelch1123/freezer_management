@@ -139,6 +139,11 @@ ui <- navbarPage(
                                checkboxInput(inputId = "s_showtable",
                                     label = "Show Modification Table",
                                     value = FALSE)
+                                ),
+                          column( width = 3,
+                                  checkboxInput(inputId = "s_show_op",
+                                                label = "Strain usage by Operator",
+                                                value = FALSE)
                                 )
                           ),
                       fluidRow(
@@ -328,35 +333,35 @@ server <- function(input, output, session) {
     
     observeEvent(input$s_overview_strain_id, {
         
-        s_startdate <- ledger_db %>% 
-            rowwise() %>% 
-            mutate(., Running_Tally = 
-                       if(Type == "Entry"){
-                           Weight * 1
-                       } else if(Type =="Removal") {
-                           Weight * -1
-                       } else {0}) %>% 
-            ungroup() %>% 
-            filter(., Strain == input$s_overview_strain_id) %>% 
-            filter(., Type != "Balance") %>% 
-            select(., Date_Added) %>% 
-            slice_min(.,Date_Added, n=1, with_ties = FALSE) %>% 
-            pull()
-        
-        s_enddate <-ledger_db %>% 
-            rowwise() %>% 
-            mutate(., Running_Tally = 
-                       if(Type == "Entry"){
-                           Weight * 1
-                       } else if(Type =="Removal") {
-                           Weight * -1
-                       } else {0}) %>% 
-            ungroup() %>% 
-            filter(., Strain == input$s_overview_strain_id) %>% 
-            filter(., Type != "Balance") %>% 
-            select(., Date_Added) %>% 
-            slice_max(.,Date_Added, n=1, with_ties= FALSE) %>% 
-            pull()
+        # s_startdate <- ledger_db %>% 
+        #     rowwise() %>% 
+        #     mutate(., Running_Tally = 
+        #                if(Type == "Entry"){
+        #                    Weight * 1
+        #                } else if(Type =="Removal") {
+        #                    Weight * -1
+        #                } else {0}) %>% 
+        #     ungroup() %>% 
+        #     filter(., Strain == input$s_overview_strain_id) %>% 
+        #     filter(., Type != "Balance") %>% 
+        #     select(., Date_Added) %>% 
+        #     slice_min(.,Date_Added, n=1, with_ties = FALSE) %>% 
+        #     pull()
+        # 
+        # s_enddate <-ledger_db %>% 
+        #     rowwise() %>% 
+        #     mutate(., Running_Tally = 
+        #                if(Type == "Entry"){
+        #                    Weight * 1
+        #                } else if(Type =="Removal") {
+        #                    Weight * -1
+        #                } else {0}) %>% 
+        #     ungroup() %>% 
+        #     filter(., Strain == input$s_overview_strain_id) %>% 
+        #     filter(., Type != "Balance") %>% 
+        #     select(., Date_Added) %>% 
+        #     slice_max(.,Date_Added, n=1, with_ties= FALSE) %>% 
+        #     pull()
 
         strain_overview_ggplot <- ledger_db %>% 
             rowwise() %>% 
