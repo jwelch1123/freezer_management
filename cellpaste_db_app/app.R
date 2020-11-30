@@ -4,6 +4,33 @@ library(tidyverse)
 library(DT)
 library(ggplot2)
 
+# Janky ValueBox ####
+valueBox <- function(value, subtitle, icon, color) {
+    # source
+    # https://www.r-bloggers.com/2018/06/valuebox-without-shinydashboard-2/
+    div(class = "col-lg-3 col-md-6",
+        div(class = "panel panel-primary",
+            div(class = "panel-heading", style = paste0("background-color:", color),
+                div(class = "row",
+                    div(class = "col-xs-3",
+                        icon(icon, "fa-5x")
+                    ),
+                    div(class = ("col-xs-9 text-right"),
+                        div(style = ("font-size: 56px; font-weight: bold;"),
+                            textOutput(value)
+                        ),
+                        div(subtitle)
+                    )
+                )
+            ),
+            div(class = "panel-footer",
+                div(class = "clearfix")
+            )
+        )
+    )
+}
+
+
 # Shiny App UI ####
 ui <- navbarPage(
     title = "Cell Paste Database",
@@ -158,16 +185,38 @@ ui <- navbarPage(
     
              # Batch Overview ####
              tabPanel("Batch Overview","Explore by Batch, see all modifications, current inventory and ledger",
-                      fluidRow(column(width = 2,
+                      fluidRow(column(width = 3,
                                       selectizeInput(inputId = "b_batch_id",
                                                      label = "Select Batch to View",
                                                      choices = NULL,
-                                                     selected = NULL)),
-                               column(width = 5), # Number of Bags | Remaining Weight
-                               column(width = 5)), # Number of Freezer/Thaws
+                                                     selected = NULL),
+                                      checkboxInput(inputId = "b_limit_extant",
+                                                    label = "Limit to Extant Batches",
+                                                    value = TRUE)),
+                               
+                               column(width = 3,
+                                      id = "numb_containers_box",
+                                      valueBox(value ="b_numb_containers",
+                                               subtitle = "Containers",
+                                               icon= "box-open",
+                                               color = "navy")),
+                               column(width = 3,
+                                      id = "total_weight_box",
+                                      valueBox(value = "b_total_weight",
+                                               subtitle = "Total Weight",
+                                               icon = "weight-hanging",
+                                               color = "blue")),
+                               # column(width = 3,
+                               #        valueBoxOutput("b_freeze_thaw_box")) # Number of Freezer/Thaws #can we grab this?
+                               ), 
                       
-                      fluidRow() #show input / output history for batch. 
-                      ),
+                      fluidRow(column(width=3,
+                                id = "test_panel",
+                               valueBox(value = "a_value",
+                                        subtitle = "Number of Containers",
+                                        icon = "box-open",
+                                        color = "navy")) #show input / output history for batch. 
+                      )),
              
     
     
@@ -388,11 +437,6 @@ server <- function(input, output, session) {
         
     })
     
-
-    
-    
-    
-    
     observeEvent(input$s_showtable,{
         output$s_strainledgertable <- DT::renderDataTable({
             if(input$s_showtable){
@@ -407,6 +451,42 @@ server <- function(input, output, session) {
                 } 
             })
     })
+    
+    # Batch Overivew Graphics ####
+    
+    observeEvent(input$b_batch_id, {
+        output$b_numb_containers <- renderText({
+            ledger_db %>%
+                group_by(., PB_Number) %>%
+                summarise(., count = n(), .groups = 'drop') %>%
+                filter(., PB_Number == input$b_batch_id) %>%
+                pull() })
+        
+        output$b_total_weight <- renderText({
+            ledger_db %>% 
+                group_by(., PB_Number) %>% 
+                filter(., Type == "Entry") %>% 
+                summarise(., Total_Weight = sum(), .groups = 'drop') %>% 
+                filter(., PB_Number == input$b_batch_id) %>% 
+                pull() })
+    })
+        
+    
+    output$a_value <- renderText({
+        ledger_db %>% 
+            group_by(., PB_Number) %>% 
+            summarise(., count = n()) %>% 
+            filter(., PB_Number == input$b_batch_id) %>% 
+            pull()
+        })
+    
+    #output$b_total_weight_box
+        
+    #output$b_freeze_thaw_box
+    
+    
+    
+    
     
     # Issues ####
         # Add infobox / valuebox for strain usage
