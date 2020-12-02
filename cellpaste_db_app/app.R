@@ -149,7 +149,9 @@ ui <- navbarPage(
                       br(),
                       br(),
                       actionButton(inputId = "mod_update_entry",
-                                   label = "Submit Change to Database")                          
+                                   label = "Submit Change to Database"),
+                      br(),
+                      br()
                       ),
              # Strain Overview ####
              tabPanel("Strain Overview",
@@ -185,6 +187,8 @@ ui <- navbarPage(
     
              # Batch Overview ####
              tabPanel("Batch Overview","Explore by Batch, see all modifications, current inventory and ledger",
+                      br(),
+                      br(),
                       fluidRow(column(width = 3,
                                       selectizeInput(inputId = "b_batch_id",
                                                      label = "Select Batch to View",
@@ -192,7 +196,10 @@ ui <- navbarPage(
                                                      selected = NULL),
                                       checkboxInput(inputId = "b_limit_extant",
                                                     label = "Limit to Extant Batches",
-                                                    value = TRUE)),
+                                                    value = TRUE),
+                                      checkboxInput(inputId = "b_showtable",
+                                                    label = "Show History Table",
+                                                    value = FALSE)),
                                
                                column(width = 3,
                                       id = "numb_containers_box",
@@ -205,26 +212,31 @@ ui <- navbarPage(
                                       valueBox(value = "b_total_weight",
                                                subtitle = "Total Weight",
                                                icon = "weight-hanging",
-                                               color = "blue")),
-                               # column(width = 3,
-                               #        valueBoxOutput("b_freeze_thaw_box")) # Number of Freezer/Thaws #can we grab this?
+                                               color = "light blue")),
+                               column(width = 3,
+                                      id = "numb_freeze_thaw_box",
+                                      valueBox(value = "b_freeze_thaw",
+                                               subtitle = "Freeze-Thaws",
+                                               icon = "snowflake",
+                                               color = "blue"))
                                ), 
                       
-                      fluidRow(column(width=3,
-                                id = "test_panel",
-                               valueBox(value = "a_value",
-                                        subtitle = "Number of Containers",
-                                        icon = "box-open",
-                                        color = "navy")) #show input / output history for batch. 
-                      )),
-             
-    
-    
-    
+                      fluidRow(
+                          column(width = 12,
+                                 plotOutput(outputId = "batch_overview_plot")
+                          )
+                      ),
+                      fluidRow(
+                         column(width = 12,
+                                dataTableOutput("b_batch_history")
+                                ) 
+                      )
+                     ),
     
             tabPanel("Search","Bring up all information on selected batches, find what you are looking for")
              
 )
+
 
 
 #Thanks to this source for this which helped on guide my thinking
@@ -234,14 +246,14 @@ ui <- navbarPage(
 
 # Shiny App Server ####
 server <- function(input, output, session) {
-    # Inport statements ####
+    # Import statements ####
     inventory_db <- read_csv("./app_inventory.csv") %>% 
         transform(Date_Modified = as.Date(Date_Modified,"%m/%d/%y"))
     
     ledger_db <- read_csv("./app_ledger.csv") %>% 
         transform(Date_Added = as.Date(Date_Added, "%m/%d/%y"))
     
-    # Render Tables ####
+    # Render Inventory and Ledger ####
     observeEvent(input$table_type, {
         output$selected_table <- DT::renderDataTable({
             if(input$table_type == "Current Inventory"){
@@ -390,10 +402,16 @@ server <- function(input, output, session) {
     updateSelectizeInput(session, "s_overview_strain_id", 
                          choices = ledger_db$Strain, 
                          selected = "", server = TRUE)
-    #Batches for Batches Page
-    updateSelectInput(session, "b_batch_id",
-                      choices = ledger_db$PB_Number,
-                      selected = "")
+    #Batches for Batches Page, dependent on 
+    observeEvent(input$b_limit_extant,{
+        updateSelectizeInput(session, "b_batch_id",
+                          choices = if(input$b_limit_extant == FALSE){
+                              ledger_db$PB_Number
+                          }else if(input$b_limit_extant == TRUE){
+                              inventory_db$PB_Number},
+                          selected = "")
+    })
+    
     
     # Strain Overview Graphics ####
     
@@ -469,34 +487,58 @@ server <- function(input, output, session) {
                 summarise(., Total_Weight = sum(), .groups = 'drop') %>% 
                 filter(., PB_Number == input$b_batch_id) %>% 
                 pull() })
-    })
         
-    
-    output$a_value <- renderText({
-        ledger_db %>% 
-            group_by(., PB_Number) %>% 
-            summarise(., count = n()) %>% 
+        output$b_freeze_thaw <- renderText({
+            ledger_db %>% 
+                group_by(., PB_Number) %>% 
+                filter(., Type == "Removal") %>% 
+                summarise(., Total_Weight = n(), .groups = 'drop') %>% 
+                filter(., PB_Number == input$b_batch_id) %>% 
+                pull() })
+        
+        batch_overview_ggplot <- ledger_db %>% 
+            rowwise() %>% 
+            mutate(., Running_Tally = 
+                       if(Type == "Entry"){
+                           Weight * 1
+                       } else if(Type =="Removal") {
+                           Weight * -1
+                       } else {0}) %>% 
+            filter(., Type != "Balance") %>% 
             filter(., PB_Number == input$b_batch_id) %>% 
-            pull()
+            ggplot(., aes(x=Date_Added, y = Running_Tally, fill = Type)) +
+            geom_col(width = 0.9) +
+            scale_fill_brewer(palette = "Dark2") +
+            labs(title = paste0("Production History of ",input$b_batch_id),
+                 x = "Cell Mass Changes",
+                 y = "Date Of Modification")
+        output$batch_overview_plot <- renderPlot(batch_overview_ggplot)
+    })
+
+    observeEvent(input$b_showtable,{
+        output$b_batch_history <- DT::renderDataTable({
+            if(input$b_showtable){
+                ledger_db %>% 
+                    rowwise() %>% 
+                    filter(., PB_Number == input$b_batch_id) %>% 
+                    mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_")) %>%
+                    ungroup() %>% 
+                    select(., c(-PB_Number, -Bag_Number, -Freezer_ID, -Shelf_Number)) %>% 
+                    select(., c(Date_Added, Type, Unique_Bag_ID, Weight, Operator, Operator_Group, Purpose, Location ))
+            } 
         })
-    
-    #output$b_total_weight_box
-        
-    #output$b_freeze_thaw_box
+    })
     
     
     
     
     
-    # Issues ####
-        # Add infobox / valuebox for strain usage
-        #need to attach shinydashboard
-        # would this look weird?
-        # Reference shinyTopics folder.
     # Notes #### 
         #take the ledger data table
         #graph with line for current amount at that time, and bar for inputs/outputs?
         # filter for date and strain
+        #Different graphs 
+        # https://www.r-graph-gallery.com/time-series.html
     # Filter for several strains? Possible?
     # Weight of current batches in the freezer
     # number of batches in the freezer, number of bags in the freezer (in text?)
