@@ -1,245 +1,258 @@
-
 library(shiny)
 library(tidyverse)
 library(DT)
 library(ggplot2)
-
-# Janky ValueBox ####
-valueBox <- function(value, subtitle, icon, color) {
-    # source
-    # https://www.r-bloggers.com/2018/06/valuebox-without-shinydashboard-2/
-    div(class = "col-lg-3 col-md-6",
-        div(class = "panel panel-primary",
-            div(class = "panel-heading", style = paste0("background-color:", color),
-                div(class = "row",
-                    div(class = "col-xs-3",
-                        icon(icon, "fa-5x")
-                    ),
-                    div(class = ("col-xs-9 text-right"),
-                        div(style = ("font-size: 56px; font-weight: bold;"),
-                            textOutput(value)
-                        ),
-                        div(subtitle)
-                    )
-                )
-            ),
-            div(class = "panel-footer",
-                div(class = "clearfix")
-            )
-        )
-    )
-}
-
+library(shinydashboard)
+library(plotly)
 
 # Shiny App UI ####
-ui <- navbarPage(
-    title = "Cell Paste Database",
-             # Inventory & Ledger ####
-             tabPanel("Inventory & Ledger", 
-                      
-                      selectInput(inputId = "table_type",
-                                  label = "Select table to View: ",
-                                  choices = c("Current Inventory", "Overall Ledger"),
-                                  selected = "Current Inventory"),
-                      dataTableOutput("selected_table")
-                      ), 
-             # Batch Input ####
-             tabPanel("New Batch Input", 
-                      br(),
-                      dateInput(inputId = "date_action",
-                                label = "Date of Action",
-                                format = "yymmdd"),
+ui <- dashboardPage(
+    skin = 'black',
+    # Header & Sidebar ####
+    dashboardHeader(title = "Cell Paste Database"),
+    dashboardSidebar( id = "", 
+        sidebarMenu(
+            menuItem("Inventory & Ledger", tabName = 'inventory_ledger', icon = icon('boxes')),
+            menuItem("Batch Input",tabName = "batch_input",icon = icon('plus-circle')),
+            menuItem("Batch Modification",tabName = "batch_mod",icon = icon('exchange-alt')),
+            menuItem("Strain View",tabName = 'strain_view',icon = icon('binoculars')),
+            menuItem("Batch View",tabName = 'batch_view',icon = icon('layer-group')),
+            menuItem("Freezer View",tabName = 'freezer_view',icon = icon('snowflake')),
+            menuItem("Search",tabName = 'search',icon = icon('search')),
+            menuItem("Settings",tabName = 'settings',icon = icon('cog'))
+        )
+    ),
+    # Body and Items ####
+    dashboardBody(
+        tabItems(
+            # Inventory & Ledger ####
+            tabItem(tabName = "inventory_ledger",
+                    h1("Inventory & Ledger"),
+                    selectInput(inputId = "table_type",
+                                label = "Select table to View: ",
+                                choices = c("Current Inventory", "Overall Ledger"),
+                                selected = "Current Inventory"),
+                    dataTableOutput("selected_table")
+            ),
+            # Batch Input ####
+            tabItem(tabName = "batch_input",
+                    h1("Input at New Batch"),
+                    br(),
+                    dateInput(inputId = "date_action",
+                            label = "Date of Action",
+                            format = "yymmdd"),
+                    
+                    textInput(inputId = "batch_id",
+                            label = "Batch ID (PB######)"),
+                    
+                    checkboxGroupInput(inputId = "input_su_checkboxes",
+                                     label = "Select Source SU units",
+                                     choiceNames = paste0("SU",1:6),
+                                     choiceValues = 1:6,
+                                     inline = T),
+                    
+                    numericInput(inputId = "bag_number",
+                               label = "Bag Number",
+                               value = 1,
+                               min = 1),
+                    
+                    numericInput(inputId = "sample_weight",
+                               label = "Sample Weight (minus bag tare)",
+                               value = 1,
+                               min = 1),
+                    
+                    radioButtons(inputId = "material_type",
+                               label = "Type of Material",
+                               choices = c("Pellet","Ferm-Sup")),
+                    
+                    selectizeInput(inputId = "strain_id",
+                                 label = "Strain ID (PP##)",
+                                 choices = NULL,
+                                 selected = NULL,
+                                 options = list( create = TRUE,
+                                                 createOnBlur = TRUE)),
+                    
+                    selectizeInput(inputId = "operator_name",
+                            label = "Operator Name",
+                            choices = NULL,
+                            selected = NULL,
+                            options = list( create = TRUE,
+                                            createOnBlur = TRUE)),
+                    
+                    selectizeInput(inputId = "freezer_name",
+                                 label = "Freezer Name",
+                                 choices = NULL,
+                                 selected = NULL,
+                                 options = list( create = TRUE,
+                                                 createOnBlur = TRUE)),
+                    
+                    numericInput(inputId = "shelf_number",
+                                label = "Shelf from Top (top = 1)",
+                                value = 1,
+                                min = 1),
+                    br(),
+                    br(),
+                    actionButton(inputId = "upload_entry",
+                               label = "Submit to Database"),
+                    br(),
+                    br()
+            ),
+            # Batch Modification ####
+            tabItem(tabName = "batch_mod",
+                    h1("Modify a Batch"),
+                    dateInput(inputId = "mod_date_action",
+                            label = "Date of Action",
+                            format = "yymmdd"),
+                    
+                    selectInput(inputId = "mod_type",
+                              label = "Type of Change",
+                              c("Removal","Set Balance"),
+                              selected = "Removal"),
+                    
+                    selectizeInput(inputId = "mod_unique_batch_id",
+                                 label = "Unique Batch ID (PB _ bag #)",
+                                 choices = NULL,
+                                 selected = NULL),
+                    
+                    numericInput(inputId = "mod_value_change",
+                              label = "How much is removed? (g)",
+                              value = 0),
+                    
+                    selectizeInput(inputId = "mod_operator",
+                              label = "Operator preforming action",
+                              choices = NULL,
+                              selected = NULL,
+                              options = list( create = TRUE,
+                                              createOnBlur = TRUE) ),
+                    
+                    selectizeInput(inputId = "mod_op_group",
+                                 label = "Group of Operator (DSP, Experimental, etc)",
+                                 choices = NULL,
+                                 selected = NULL,
+                                 options = list( create = TRUE,
+                                                 createOnBlur = TRUE) ),
+                    
+                    textInput(inputId = "mod_reason",
+                              label = "Reason for Change",
+                              value = ""),
+                    
+                    checkboxInput(inputId = "mod_remove_unique_id",
+                              label = "Should this Unique bag be removed?",
+                              value = FALSE),
+                    br(),
+                    br(),
+                    actionButton(inputId = "mod_update_entry",
+                               label = "Submit Change to Database"),
+                    br(),
+                    br()
+            ),
+            # Strain Overview ####
+            tabItem(tabName = "strain_view",
+                    h1("Strain Information"),
+                    fluidRow(
+                      column( width = 4,
+                          selectizeInput(inputId = "s_overview_strain_id",
+                                 label = "Select Strain to View",
+                                 choices = NULL,
+                                 selected = NULL)
+                            ),
+                      column( width = 3,
+                           checkboxInput(inputId = "s_showtable",
+                                label = "Show Modification Table",
+                                value = FALSE)
+                            ),
+                      column( width = 3,
+                              selectInput(inputId = "s_show_other",
+                                            label = "Strain usage by:",
+                                            choices = c("Operator_Group","Operator","Location") ,
+                                            selected = "Operator_Group")
+                            )
+                      ),
+                    fluidRow(
+                      column(width = 8,
+                           plotOutput(outputId = "strain_overview_plot")
+                           ),
+                      column(width = 4,
+                            plotOutput(outputId = "strain_usage_plot"))
+                    ),
+                    br(),
+                    dataTableOutput("s_strainledgertable")
+            ),
+            # Batch Overview ####
+            tabItem(tabName = "batch_view",
+                    h1("Batch Information"),
+                    br(),
+                    br(),
+                    fluidRow(column(width = 3,
+                                  selectizeInput(inputId = "b_batch_id",
+                                                 label = "Select Batch to View",
+                                                 choices = NULL,
+                                                 selected = NULL),
+                                  checkboxInput(inputId = "b_limit_extant",
+                                                label = "Limit to Extant Batches",
+                                                value = TRUE),
+                                  checkboxInput(inputId = "b_showtable",
+                                                label = "Show History Table",
+                                                value = FALSE)),
+                    
+                           column(width = 3, valueBoxOutput('numb_containers_box')),
 
-                      textInput(inputId = "batch_id",
-                                label = "Batch ID (PB######)"),
-                      
-                      checkboxGroupInput(inputId = "input_su_checkboxes",
-                                         label = "Select Source SU units",
-                                         choiceNames = paste0("SU",1:6),
-                                         choiceValues = 1:6,
-                                         inline = T),
+                           column(width = 3, valueBoxOutput('total_weight_box')),
 
-                      numericInput(inputId = "bag_number",
-                                   label = "Bag Number",
-                                   value = 1,
-                                   min = 1),
-
-                      numericInput(inputId = "sample_weight",
-                                   label = "Sample Weight (minus bag tare)",
-                                   value = 1,
-                                   min = 1),
-                      
-                      radioButtons(inputId = "material_type",
-                                   label = "Type of Material",
-                                   choices = c("Pellet","Ferm-Sup")),
-                      
-                      selectizeInput(inputId = "strain_id",
-                                     label = "Strain ID (PP##)",
-                                     choices = NULL,
-                                     selected = NULL,
-                                     options = list( create = TRUE,
-                                                     createOnBlur = TRUE)),
-                      
-                      selectizeInput(inputId = "operator_name",
-                                label = "Operator Name",
-                                choices = NULL,
-                                selected = NULL,
-                                options = list( create = TRUE,
-                                                createOnBlur = TRUE)),
-                      
-                      selectizeInput(inputId = "freezer_name",
-                                     label = "Freezer Name",
-                                     choices = NULL,
-                                     selected = NULL,
-                                     options = list( create = TRUE,
-                                                     createOnBlur = TRUE)),
-                      
-                      numericInput(inputId = "shelf_number",
-                                    label = "Shelf from Top (top = 1)",
-                                    value = 1,
-                                    min = 1),
-                      br(),
-                      br(),
-                      actionButton(inputId = "upload_entry",
-                                   label = "Submit to Database"),
-                      br(),
-                      br()
-                      ), 
-             # Batch Modification ####
-             tabPanel("Batch Modification", 
-                      dateInput(inputId = "mod_date_action",
-                                label = "Date of Action",
-                                format = "yymmdd"),
-                      
-                      selectInput(inputId = "mod_type",
-                                  label = "Type of Change",
-                                  c("Removal","Set Balance"),
-                                  selected = "Removal"),
-                      
-                      selectizeInput(inputId = "mod_unique_batch_id",
-                                     label = "Unique Batch ID (PB _ bag #)",
-                                     choices = NULL,
-                                     selected = NULL),
-                      
-                      numericInput(inputId = "mod_value_change",
-                                  label = "How much is removed? (g)",
-                                  value = 0),
-                      
-                      selectizeInput(inputId = "mod_operator",
-                                  label = "Operator preforming action",
-                                  choices = NULL,
-                                  selected = NULL,
-                                  options = list( create = TRUE,
-                                                  createOnBlur = TRUE) ),
-                      
-                      selectizeInput(inputId = "mod_op_group",
-                                     label = "Group of Operator (DSP, Experimental, etc)",
-                                     choices = NULL,
-                                     selected = NULL,
-                                     options = list( create = TRUE,
-                                                     createOnBlur = TRUE) ),
-                      
-                      textInput(inputId = "mod_reason",
-                                  label = "Reason for Change",
-                                  value = ""),
-                      
-                      checkboxInput(inputId = "mod_remove_unique_id",
-                                  label = "Should this Unique bag be removed?",
-                                  value = FALSE),
-                      br(),
-                      br(),
-                      actionButton(inputId = "mod_update_entry",
-                                   label = "Submit Change to Database"),
-                      br(),
-                      br()
-                      ),
-             # Strain Overview ####
-             tabPanel("Strain Overview",
-                      fluidRow(
-                          column( width = 4,
-                              selectizeInput(inputId = "s_overview_strain_id",
-                                     label = "Select Strain to View",
-                                     choices = NULL,
-                                     selected = NULL)
-                                ),
-                          column( width = 3,
-                               checkboxInput(inputId = "s_showtable",
-                                    label = "Show Modification Table",
-                                    value = FALSE)
-                                ),
-                          column( width = 3,
-                                  selectInput(inputId = "s_show_other",
-                                                label = "Strain usage by:",
-                                                choices = c("Operator_Group","Operator","Location") ,
-                                                selected = "Operator_Group")
-                                )
-                          ),
-                      fluidRow(
-                          column(width = 8,
-                               plotOutput(outputId = "strain_overview_plot")
-                               ),
-                          column(width = 4,
-                                plotOutput(outputId = "strain_usage_plot"))
-                      ),
-                      br(),
-                      dataTableOutput("s_strainledgertable")
-                      ),
-    
-             # Batch Overview ####
-             tabPanel("Batch Overview","Explore by Batch, see all modifications, current inventory and ledger",
-                      br(),
-                      br(),
-                      fluidRow(column(width = 3,
-                                      selectizeInput(inputId = "b_batch_id",
-                                                     label = "Select Batch to View",
-                                                     choices = NULL,
-                                                     selected = NULL),
-                                      checkboxInput(inputId = "b_limit_extant",
-                                                    label = "Limit to Extant Batches",
-                                                    value = TRUE),
-                                      checkboxInput(inputId = "b_showtable",
-                                                    label = "Show History Table",
-                                                    value = FALSE)),
-                               
-                               column(width = 3,
-                                      id = "numb_containers_box",
-                                      valueBox(value ="b_numb_containers",
-                                               subtitle = "Containers",
-                                               icon= "box-open",
-                                               color = "navy")),
-                               column(width = 3,
-                                      id = "total_weight_box",
-                                      valueBox(value = "b_total_weight",
-                                               subtitle = "Total Weight",
-                                               icon = "weight-hanging",
-                                               color = "light blue")),
-                               column(width = 3,
-                                      id = "numb_freeze_thaw_box",
-                                      valueBox(value = "b_freeze_thaw",
-                                               subtitle = "Freeze-Thaws",
-                                               icon = "snowflake",
-                                               color = "blue"))
-                               ), 
-                      
-                      fluidRow(
-                          column(width = 12,
-                                 plotOutput(outputId = "batch_overview_plot")
-                          )
-                      ),
-                      fluidRow(
-                         column(width = 12,
-                                dataTableOutput("b_batch_history")
-                                ) 
+                           column(width = 3, valueBoxOutput('numb_freeze_thaw_box'))
+                    ),
+                    
+                    fluidRow(
+                      column(width = 12,
+                             plotOutput(outputId = "batch_overview_plot")
                       )
-                     ),
-    
-            tabPanel("Search","Bring up all information on selected batches, find what you are looking for")
-             
+                    ),
+                    fluidRow(
+                     column(width = 12,
+                            dataTableOutput("b_batch_history")
+                      )
+                    )
+            ),
+            # Freezer View ####
+            tabItem(tabName = "freezer_view",
+                    h1("Freezer View"),
+                    fluidRow(column(4,
+                                    selectizeInput(inputId = "freezer_choice",
+                                   label = "Select Freezer to View Contents",
+                                   choices = NULL,
+                                   selected = NULL))),
+                    fluidRow(column(8,
+                                    dataTableOutput("freezer_choice_table")))
+            ),
+            # Search ####
+            tabItem(tabName = "search"),
+            
+            # Settings ####
+            tabItem(tabName = 'settings',
+                    h1("Settings"),
+                    h3("Database Reset"),
+                
+                    "Resetting the database will mark all batches as removed in the Ledger Database.",
+                    br(),
+                    "Inventory database will be saved as 'Depreicated_Inventory_DATE'.",
+                    br(),
+                    "If the Ledger is also reset, a similar file will be created.",
+                    br(),
+                    "All new files will exist in the same directory as the app & old databases.",
+                    
+                    checkboxInput(inputId = 'ledger_reset',
+                                  label = 'Include Ledger in Reset?',
+                                  value = FALSE),
+                    checkboxInput(inputId = 'reset_confirmation',
+                                  label = 'Check to confirm Reset of Inventory (and Ledger)',
+                                  value = FALSE),
+                    actionButton(inputId = "reset_databases",
+                                 label = "Reset Database(s)"))
+        )
+    )
 )
-
-
-
-#Thanks to this source for this which helped on guide my thinking
+    
+#Thanks to this source which helped guide my thinking
 #https://deanattali.com/2015/06/14/mimicking-google-form-shiny/
 
 
@@ -411,6 +424,10 @@ server <- function(input, output, session) {
                               inventory_db$PB_Number},
                           selected = "")
     })
+    #Freezer View Page
+    updateSelectizeInput(session, 'freezer_choice',
+                         choices = inventory_db$Freezer_ID,
+                         selected = "", server = TRUE)
     
     
     # Strain Overview Graphics ####
@@ -470,31 +487,49 @@ server <- function(input, output, session) {
             })
     })
     
-    # Batch Overivew Graphics ####
-    
+    # Batch Overview Graphics ####
     observeEvent(input$b_batch_id, {
-        output$b_numb_containers <- renderText({
-            ledger_db %>%
+        
+        output$numb_containers_box <- renderValueBox({
+            batch_numb_containers <- ledger_db %>%
                 group_by(., PB_Number) %>%
                 summarise(., count = n(), .groups = 'drop') %>%
                 filter(., PB_Number == input$b_batch_id) %>%
-                pull() })
+                pull()
+            
+            valueBox(value = batch_numb_containers,
+                     subtitle = "Number of Containers",
+                     icon = icon("box-open"),
+                     color = 'navy')
+        })
         
-        output$b_total_weight <- renderText({
-            ledger_db %>% 
+        output$total_weight_box <- renderValueBox({
+            total_weight <- ledger_db %>% 
                 group_by(., PB_Number) %>% 
                 filter(., Type == "Entry") %>% 
                 summarise(., Total_Weight = sum(), .groups = 'drop') %>% 
                 filter(., PB_Number == input$b_batch_id) %>% 
-                pull() })
-        
-        output$b_freeze_thaw <- renderText({
-            ledger_db %>% 
+                pull()
+            
+            valueBox(subtitle = "Total Weight",
+                     value = total_weight,
+                     icon = icon('weight-hanging'),
+                     color = 'light-blue')
+        })
+                
+        output$numb_freeze_thaw_box <- renderValueBox({
+            freeze_thaws <- ledger_db %>% 
                 group_by(., PB_Number) %>% 
                 filter(., Type == "Removal") %>% 
                 summarise(., Total_Weight = n(), .groups = 'drop') %>% 
                 filter(., PB_Number == input$b_batch_id) %>% 
-                pull() })
+                pull()
+            
+            valueBox(subtitle = 'Freeze-Thaws',
+                     value = freeze_thaws,
+                     icon = icon('snowflake'),
+                     color = 'blue')
+        })
         
         batch_overview_ggplot <- ledger_db %>% 
             rowwise() %>% 
@@ -524,11 +559,41 @@ server <- function(input, output, session) {
                     mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_")) %>%
                     ungroup() %>% 
                     select(., c(-PB_Number, -Bag_Number, -Freezer_ID, -Shelf_Number)) %>% 
-                    select(., c(Date_Added, Type, Unique_Bag_ID, Weight, Operator, Operator_Group, Purpose, Location ))
+                    select(., c(Date_Added, Type, Unique_Bag_ID, Weight, 
+                                Operator, Operator_Group, Purpose, Location ))
             } 
         })
     })
     
+    # Freezer View Graphics ####
+    observeEvent(input$freezer_choice,{
+        output$freezer_choice_table <- DT::renderDataTable({
+            inventory_db %>% 
+                filter(., Freezer_ID == input$freezer_choice) %>% 
+                mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_")) %>% 
+                select(., c(Date_Modified, Unique_Bag_ID, Location, 
+                            Material_type, Weight))
+        })
+    })
+    
+    
+    # Setting Options ####
+    observeEvent(input$reset_databases,{
+        if(input$reset_confirmation){
+            #update inventory to ledger
+            #save inventory as storage file
+            #save a empty inventory file.
+            if(input$ledger_reset){
+                #save ledger as storage file
+                #save a empty ledger file
+                
+            }
+            
+        }
+    })
+    
+    
+    # Spacer ####
     
     
     
@@ -544,11 +609,6 @@ server <- function(input, output, session) {
     # number of batches in the freezer, number of bags in the freezer (in text?)
     # Add table reset option.
     
-    # Batch Overview ####
-        # select one batch,
-    # see successive removals
-    # topline freezer thaw numbers
-    # 
     
     # Other? ####
 }
