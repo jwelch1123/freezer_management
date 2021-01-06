@@ -225,26 +225,49 @@ ui <- dashboardPage(
                                     dataTableOutput("freezer_choice_table")))
             ),
             # Search ####
-            tabItem(tabName = "search"),
+            tabItem(tabName = "search",
+                    box(
+                        selectInput(inputId = "flex_timeframe",
+                                    label = "View Current inventory or All?",
+                                    choices = c("Current Inventory", "Overall Ledger"),
+                                    selected = "Current Inventory"),
+                        
+                        selectInput(inputId = "flex_batch_or_strain",
+                                    label = "View by Strain or Batch?",
+                                    choices = c("Strain","Batch"),
+                                    selected = NULL),
+                        
+                        selectizeInput(inputId = "flex_ids",
+                                       label = NULL,
+                                       choices = NULL,
+                                       selected = NULL,
+                                       multiple = TRUE)
+                    )
+                    
+                    
+            ),
             
             # Settings ####
             tabItem(tabName = 'settings',
                     h1("Settings"),
                     h3("Database Reset"),
                 
-                    "Resetting the database will mark all batches as removed in the Ledger Database.",
+                    "Resetting the database will create a 'balance' entry in the Ledger Database.",
                     br(),
-                    "Inventory database will be saved as 'Depreicated_Inventory_DATE'.",
+                    "Inventory database will be saved as 'Inventory_Archieve_DATE'.",
                     br(),
                     "If the Ledger is also reset, a similar file will be created.",
                     br(),
                     "All new files will exist in the same directory as the app & old databases.",
+                    br(),
+                    "Reimporting old databases is not supported.",
+                    br(),
                     
                     checkboxInput(inputId = 'ledger_reset',
-                                  label = 'Include Ledger in Reset?',
+                                  label = 'Include Ledger in reset?',
                                   value = FALSE),
                     checkboxInput(inputId = 'reset_confirmation',
-                                  label = 'Check to confirm Reset of Inventory (and Ledger)',
+                                  label = 'Check to confirm reset of Inventory (and Ledger)',
                                   value = FALSE),
                     actionButton(inputId = "reset_databases",
                                  label = "Reset Database(s)"))
@@ -322,7 +345,7 @@ server <- function(input, output, session) {
         
         if(input$mod_unique_batch_id == ""){
             session$reload()
-            #dont love this solution but it works
+            #don't love this solution but it works
         }
         
         inventory_update_row <- (inventory_db %>%  
@@ -366,14 +389,6 @@ server <- function(input, output, session) {
         ledger_update_row$Operator = input$mod_operator
         ledger_update_row$Operator_Group = input$mod_op_group
         ledger_update_row$Purpose = input$mod_reason
-        
-        #drop all of this?
-        print('ledger_db')
-        print(ncol(ledger_db))
-        print(head(ledger_db))
-        print("ledger_update_row")
-        print(length(ledger_update_row))
-        print(ledger_update_row)
         
         ledger_db <- rbind(ledger_db, ledger_update_row)
 
@@ -429,6 +444,24 @@ server <- function(input, output, session) {
                          choices = inventory_db$Freezer_ID,
                          selected = "", server = TRUE)
     
+    #Flex selection
+    observeEvent(c(input$flex_timeframe, input$flex_batch_or_strain) ,{
+        updateSelectizeInput(session, 'flex_ids',
+                             choices = if(input$flex_batch_or_strain == "Batch"){
+                                 if(input$flex_timeframe == "Current Inventory"){
+                                     inventory_db$PB_Number
+                                 } else if(input$flex_timeframe == "Overall Ledger"){
+                                     ledger_db$PB_Number
+                                 }
+                             } else if(input$flex_batch_or_strain == "Strain"){
+                                 if(input$flex_timeframe == "Current Inventory"){
+                                     inventory_db$Strain
+                                 } else if(input$flex_timeframe == "Overall Ledger"){
+                                     ledger_db$Strain
+                                 }
+                             } else{""},
+                             label = paste0("Select ",input$flex_batch_or_strain))
+    })
     
     # Strain Overview Graphics ####
     
@@ -580,12 +613,59 @@ server <- function(input, output, session) {
     # Setting Options ####
     observeEvent(input$reset_databases,{
         if(input$reset_confirmation){
-            #update inventory to ledger
-            #save inventory as storage file
-            #save a empty inventory file.
+            #Create data frame to hold modified inventory_db
+            inventory_reset_holder <- inventory_db %>% 
+                mutate(.,Date_Added = Date_Modified, .keep = 'unused') %>% 
+                mutate(.,Type = "Balance",
+                       Operator = "Reset Admin",
+                       Operator_Group = "Reset Admin",
+                       Purpose = "Record of Inventory batches before reset") %>% 
+                select(., Date_Added, Type, PB_Number, Bag_Number,
+                       Unique_Bag_ID, Weight, Material_Type, Strain, Operator,
+                       Operator_Group, Freezer_ID, Shelf_Number, Purpose)
+            
+            #Bind modified inventory to ledger and save to ledger.csv
+            ledger_db <- bind_rows(ledger_db, inventory_reset_holder)
+            write.csv(ledger_db, file = "./app_ledger.csv", row.names = F)
+            
+            #create archive_inventory_Date file
+            write.csv(inventory_db, file = paste0("./inventory_archive_",Sys.Date(),".csv"), row.names = F)
+            
+            #Create an empty dataframe, types are only for aesthetic,
+            # lost when saved to CSV
+            inventory_db_empty <- data.frame(Date_Modified = character(), 
+                                             Unique_Bag_ID = character(),
+                                             PB_Number = character(), 
+                                             Bag_Number = numeric(),
+                                             Strain = character(),
+                                             Material_Type = character(), 
+                                             Weight = numeric(), 
+                                             Freezer_ID = character(), 
+                                             Shelf_Number = numeric(), 
+                                             stringsAsFactors = FALSE)
+                
+            write.csv(inventory_db_empty, file = "./app_inventory.csv", row.names = F)
+            
+            # if ledger is reset, save ledger to an archive, create empty DF, overwrite app_ledger.csv
             if(input$ledger_reset){
-                #save ledger as storage file
-                #save a empty ledger file
+                write.csv(ledger_db, file = paste0("./ledger_archive_",Sys.Date(),".csv"), row.names = F)
+                
+                ledger_db_empty <- data.frame(Date_Added = character(), 
+                                                 Type = character(), 
+                                                 PB_Number = character(), 
+                                                 Bag_Number = numeric(),
+                                                 Unique_Bag_ID = character(), 
+                                                 Weight = numeric(), 
+                                                 Material_Type = character(), 
+                                                 Strain = character(), 
+                                                 Operator = character(),
+                                                 Operator_Group = character(), 
+                                                 Freezer_ID = character(), 
+                                                 Shelf_Number = numeric(), 
+                                                 Purpose = character(), 
+                                                 stringsAsFactors = FALSE)
+                
+                write.csv(ledger_db_empty, file = "./app_ledger.csv", row.names = F)
                 
             }
             
