@@ -1,3 +1,4 @@
+# Packages ####
 library(shiny)
 library(tidyverse)
 library(DT)
@@ -19,6 +20,7 @@ ui <- dashboardPage(
             menuItem("Batch View",tabName = 'batch_view',icon = icon('layer-group')),
             menuItem("Freezer View",tabName = 'freezer_view',icon = icon('snowflake')),
             menuItem("Search",tabName = 'search',icon = icon('search')),
+            menuItem("Flex",tabName = 'flex_page',icon = icon('search')),
             menuItem("Settings",tabName = 'settings',icon = icon('cog'))
         )
     ),
@@ -226,7 +228,7 @@ ui <- dashboardPage(
             ),
             # Search ####
             tabItem(tabName = "search",
-                    box(
+                    box(title = "Inputs",
                         selectInput(inputId = "flex_timeframe",
                                     label = "View Current inventory or All?",
                                     choices = c("Current Inventory", "Overall Ledger"),
@@ -242,9 +244,50 @@ ui <- dashboardPage(
                                        choices = NULL,
                                        selected = NULL,
                                        multiple = TRUE)
-                    )
+                    ),
                     
+                    box(title = "Stats",dataTableOutput("flex_summary")),
+                    box(title = "Tester",textOutput("test_text")),
                     
+                    tabBox(title = "Run Chart",
+                           side = "right",
+                           id = "run_chart",
+                           tabPanel("Table",dataTableOutput("flex_table") ),
+                           tabPanel("Graph",plotlyOutput("flex_plot")) 
+                    ),
+            ),
+            tabItem(tabName = "flex_page",
+                    box(title = "Inputs",
+                        selectInput(inputId = "flex_database",
+                                    label = "View Current or All Information?",
+                                    choices = c("Current Inventory" = "inventory_db", 
+                                                "Overall Ledger" = "ledger_db"),
+                                    selected = "Current Inventory"),
+                        
+                        selectizeInput(inputId = "flex_strain",
+                                    label = "Select one or more Strains",
+                                    choices = NULL,
+                                    selected = NULL,
+                                    multiple = TRUE
+                                    ),
+                        
+                        selectizeInput(inputId = "flex_batch",
+                                       label = "Select one or more Batches",
+                                       choices = NULL,
+                                       selected = NULL,
+                                       multiple = TRUE
+                                       )
+                    ),
+                    
+                    #box(title = "Stats",dataTableOutput("flex_summary")),
+                    #box(title = "Tester",textOutput("test_text")),
+                    #
+                    # tabBox(title = "Run Chart",
+                    #        side = "right",
+                    #        id = "run_chart",
+                    #        tabPanel("Table",dataTableOutput("flex_table") ),
+                    #        tabPanel("Graph",plotlyOutput("flex_plot")) 
+                    # ),
             ),
             
             # Settings ####
@@ -285,6 +328,7 @@ server <- function(input, output, session) {
     # Import statements ####
     inventory_db <- read_csv("./app_inventory.csv") %>% 
         transform(Date_Modified = as.Date(Date_Modified,"%m/%d/%y"))
+    
     
     ledger_db <- read_csv("./app_ledger.csv") %>% 
         transform(Date_Added = as.Date(Date_Added, "%m/%d/%y"))
@@ -463,6 +507,31 @@ server <- function(input, output, session) {
                              label = paste0("Select ",input$flex_batch_or_strain))
     })
     
+    # WORKING AREA ####
+    
+
+    observeEvent(c(input$flex_database, input$flex_batch), {
+        if(is.null(input$flex_batch)){
+            updateSelectizeInput(session, "flex_strain",
+                                 choices = get(input$flex_database)$Strain,
+                                 selected = "", server = TRUE)
+        } else{
+            updateSelectizeInput(session, "flex_strain",
+                                 choices = get(input$flex_database) %>% filter(.,PB_Number == input$flex_batch) %>% pull(Strain),
+                                 selected = "", server = TRUE)
+        }
+    })
+    observeEvent(c(input$flex_database, input$flex_strain),{
+        if(is.null(input$flex_strain)){
+            updateSelectizeInput(session, "flex_batch",
+                                 choices = get(input$flex_database)$PB_Number,
+                                 selected = "", server = TRUE)
+        } else {
+            updateSelectizeInput(session, "flex_batch",
+                                 choices = get(input$flex_database) %>% filter(., Strain == input$flex_strain) %>% pull(PB_Number),
+                                 selected = "", server = TRUE)
+        }
+    })
     # Strain Overview Graphics ####
     
     observeEvent(c(input$s_overview_strain_id, input$s_show_other), {
@@ -609,6 +678,57 @@ server <- function(input, output, session) {
         })
     })
     
+    # Flex Page ####
+    #testing - delete me
+    output$test_text <- renderText(c(input$flex_timeframe,input$flex_batch_or_strain))
+
+    observeEvent(input$flex_ids, {
+        # make it easy to handle
+        choice <- switch (paste0(input$flex_timeframe,"_",input$flex_batch_or_strain),
+                          "Current Inventory_Strain" = "I_S",
+                          "Overall Ledger_Strain" = "L_S",
+                          "Current Inventory_Batch" = "I_B",
+                          "Overall Ledger_Batch" = "L_B"
+        ) # can I load the inputs into a list? reactiveValuesToList()?
+
+        flex_database <- switch (input$flex_timeframe,
+                       "Current Inventory" = inventory_db,
+                       "Overall Ledger" = ledger_db
+                       )
+
+        flex_group <- input$flex_strain_or_batch #rewrite this
+
+
+        #render summary table
+        output$flex_table <- DT::renderDataTable({
+            flex_database %>%
+                filter(., Strain %in% input$flex_ids | Batch %in% input$flex_ids) %>%
+                mutate(., if(flex_group == "Batch"){"hi"}) %>%
+                group_by(., flex_group)
+
+
+        })
+
+        #summary inventory _ batch
+        output$flex_table <- DT::renderDataTable({
+            flex_database %>%
+                filter(., Batch %in% input$flex_ids)
+
+
+        })
+
+        freeze_thaws <- ledger_db %>%
+            group_by(., PB_Number) %>%
+            filter(., Type == "Removal") %>%
+            summarise(., Total_Weight = n(), .groups = 'drop') %>%
+            filter(., PB_Number == input$b_batch_id) %>%
+            pull()
+
+        
+        # observe tab choice
+            # render run chart
+            # render run table 
+    })
     
     # Setting Options ####
     observeEvent(input$reset_databases,{
@@ -692,6 +812,7 @@ server <- function(input, output, session) {
     
     # Other? ####
 }
+
 
 # Run the application 
 shinyApp(ui = ui, server = server)
