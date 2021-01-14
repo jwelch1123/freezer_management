@@ -246,16 +246,17 @@ ui <- dashboardPage(
                                        multiple = TRUE)
                     ),
                     
-                    box(title = "Stats",dataTableOutput("flex_summary")),
+                    #box(title = "Stats",dataTableOutput("flex_summary")),
                     box(title = "Tester",textOutput("test_text")),
                     
-                    tabBox(title = "Run Chart",
-                           side = "right",
-                           id = "run_chart",
-                           tabPanel("Table",dataTableOutput("flex_table") ),
-                           tabPanel("Graph",plotlyOutput("flex_plot")) 
-                    ),
+                    # tabBox(title = "Run Chart",
+                    #        side = "right",
+                    #        id = "run_chart",
+                    #        tabPanel("Table",dataTableOutput("flex_table") ),
+                    #        tabPanel("Graph",plotlyOutput("flex_plot")) 
+                    # ),
             ),
+            # FlexPage ####
             tabItem(tabName = "flex_page",
                     box(title = "Inputs",
                         selectInput(inputId = "flex_database",
@@ -279,15 +280,16 @@ ui <- dashboardPage(
                                        )
                     ),
                     
-                    #box(title = "Stats",dataTableOutput("flex_summary")),
+                    box(title = "Stats",dataTableOutput("flex_summary")),
                     #box(title = "Tester",textOutput("test_text")),
                     #
-                    # tabBox(title = "Run Chart",
-                    #        side = "right",
-                    #        id = "run_chart",
-                    #        tabPanel("Table",dataTableOutput("flex_table") ),
-                    #        tabPanel("Graph",plotlyOutput("flex_plot")) 
-                    # ),
+                     tabBox(title = "Run Chart",
+                            side = "right",
+                            id = "run_chart",
+                            tabPanel("Table",dataTableOutput("flex_table") ),
+                            #tabPanel("Graph",plotlyOutput("flex_plot"))
+                            tabPanel("Graph",plotOutput("flex_plot"))
+                     ),
             ),
             
             # Settings ####
@@ -507,31 +509,38 @@ server <- function(input, output, session) {
                              label = paste0("Select ",input$flex_batch_or_strain))
     })
     
-    # WORKING AREA ####
-    
 
-    observeEvent(c(input$flex_database, input$flex_batch), {
-        if(is.null(input$flex_batch)){
-            updateSelectizeInput(session, "flex_strain",
-                                 choices = get(input$flex_database)$Strain,
-                                 selected = "", server = TRUE)
-        } else{
-            updateSelectizeInput(session, "flex_strain",
-                                 choices = get(input$flex_database) %>% filter(.,PB_Number == input$flex_batch) %>% pull(Strain),
-                                 selected = "", server = TRUE)
-        }
-    })
-    observeEvent(c(input$flex_database, input$flex_strain),{
+    # Update Flex Page Selections
+    observeEvent(input$flex_batch, {
         if(is.null(input$flex_strain)){
-            updateSelectizeInput(session, "flex_batch",
-                                 choices = get(input$flex_database)$PB_Number,
-                                 selected = "", server = TRUE)
-        } else {
-            updateSelectizeInput(session, "flex_batch",
-                                 choices = get(input$flex_database) %>% filter(., Strain == input$flex_strain) %>% pull(PB_Number),
+            updateSelectizeInput(session, "flex_strain",
+                                 choices = get(input$flex_database) %>%
+                                     filter(.,if(!is.null(input$flex_batch)){PB_Number == input$flex_batch
+                                         } else {!is.na(Strain)}) %>%
+                                     pull(Strain),
                                  selected = "", server = TRUE)
         }
     })
+    observeEvent(input$flex_strain,{
+        if(is.null(input$flex_batch)){
+            updateSelectizeInput(session, "flex_batch",
+                                 choices = get(input$flex_database) %>%
+                                     filter(., if(!is.null(input$flex_strain)){Strain == input$flex_strain
+                                         } else {!is.na(PB_Number)}) %>%
+                                     pull(PB_Number),
+                                 selected = "", server = TRUE)
+        }
+    })
+    observeEvent(input$flex_database,{
+        updateSelectizeInput(session, "flex_strain",
+                             choices = get(input$flex_database)$Strain,
+                             selected = "", server = TRUE)
+        updateSelectizeInput(session, "flex_batch",
+                             choices = get(input$flex_database)$PB_Number,
+                             selected = "", server = TRUE)
+    })
+
+    
     # Strain Overview Graphics ####
     
     observeEvent(c(input$s_overview_strain_id, input$s_show_other), {
@@ -678,7 +687,7 @@ server <- function(input, output, session) {
         })
     })
     
-    # Flex Page ####
+    # Search Page ####
     #testing - delete me
     output$test_text <- renderText(c(input$flex_timeframe,input$flex_batch_or_strain))
 
@@ -729,6 +738,102 @@ server <- function(input, output, session) {
             # render run chart
             # render run table 
     })
+    
+    # Flex Page Graphics ####
+    
+    
+    observeEvent(c(input$flex_strain, input$flex_batch),{
+        
+        if(input$flex_database == "inventory_db"){
+            output$flex_table <- DT::renderDataTable(
+                get(input$flex_database) %>% 
+                    filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
+                           if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
+                    mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
+                    select(., Unique_Bag_ID, Weight, Material_type, Location)
+            )
+            
+            if(is.null(input$flex_batch)){
+                output$flex_summary <- DT::renderDataTable( 
+                    get(input$flex_database) %>% 
+                        filter(., PB_Number %in% input$flex_batch) %>% 
+                        #group_by(., PB_Number) %>% #use for groups
+                        summarise(., 
+                                  `Number of Batches` = length(unique(PB_Number)),
+                                  `Number of Bags` = length(unique(Unique_Bag_ID)),
+                                `Total Weight` = sum(Weight), 
+                                `Freezer Locations` = list(unique(Freezer_ID)),
+                                .groups = 'drop') %>% 
+                        mutate(., across(.cols = everything(), as.character)) %>% 
+                        pivot_longer(., cols = everything(), names_to = "Statistic", values_to = "Value"),
+                    rownames = FALSE
+                    
+                    #break this out into the else statement, silence the grouping arguemnt,
+                    # decide on the inventory_by_batch summaries.
+                    # WORK AREA ####
+                    
+                )
+                        
+                } else{
+                #render at batch level
+            }
+            
+            #output$flex_plot <- renderPlotly()
+            
+            output$flex_plot <- renderPlot(
+                get(input$flex_database) %>% 
+                rowwise() %>% 
+                mutate(., Running_Tally = 
+                           if(Type == "Entry"){
+                               Weight * 1
+                           } else if(Type =="Removal") {
+                               Weight * -1
+                           } else {0}) %>% 
+                filter(., Type != "Balance") %>% 
+                filter(., Strain == input$s_overview_strain_id) %>% 
+                ggplot(., aes(x=Date_Added, y = Running_Tally, fill = Type)) +
+                geom_col(width = 0.9) +
+                scale_fill_brewer(palette = "Dark2") +
+                labs(title = paste0("Production History of ",input$s_overview_strain_id),
+                     x = "Cell Mass Changes",
+                     y = "Date Of Modification")
+            )
+            
+            
+        } else if(input$flex_database == "ledger_db"){
+            output$flex_table <- DT::renderDataTable(
+                get(input$flex_database) %>% 
+                    filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
+                           if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
+                    mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
+                    select(., Unique_Bag_ID, Weight, Material_type, Location)
+                
+            )
+            #output$flex_summary <- DT::renderDataTable()    
+            #output$flex_plot <- renderPlotly()
+            
+            output$flex_plot <- renderPlot(
+                get(input$flex_database) %>% 
+                    rowwise() %>% 
+                    mutate(., Running_Tally = 
+                               if(Type == "Entry"){
+                                   Weight * 1
+                               } else if(Type =="Removal") {
+                                   Weight * -1
+                               } else {0}) %>% 
+                    filter(., Type != "Balance") %>% 
+                    filter(., Strain == input$flex_strain) %>% 
+                    ggplot(., aes(x=Date_Added, y = Running_Tally, fill = Type)) +
+                    geom_col(width = 0.9) +
+                    scale_fill_brewer(palette = "Dark2") +
+                    labs(title = paste0("Production History of ",input$flex_strain),
+                         x = "Cell Mass Changes",
+                         y = "Date Of Modification")
+            )
+        }  
+    })
+    
+    
     
     # Setting Options ####
     observeEvent(input$reset_databases,{
