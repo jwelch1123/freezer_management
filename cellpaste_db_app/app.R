@@ -351,13 +351,18 @@ server <- function(input, output, session) {
         
         ledger_update_list <- list(input$date_action,
                              "Entry",
-                             paste0(toupper(input$batch_id),"_SU",input$input_su_checkboxes),
+                             if(!is.null(input_su_checkbox)){
+                                 paste0(toupper(input$batch_id),"_SU",input$input_su_checkboxes)
+                             } else {toupper(input$batch_id)},
                              input$bag_number,
-                             paste0(toupper(input$batch_id),"_",input$bag_number),
+                             if(!is.null(input_su_checkbox)){
+                                 paste0(toupper(input$batch_id),"_SU",input$input_su_checkboxes,"_", input$bag_number)
+                             } else {paste0(toupper(input$batch_id),"_",input$bag_number)},
                              input$sample_weight,
                              input$material_type,
                              toupper(input$strain_id),
                              input$operator_name,
+                             "Harvest",
                              input$freezer_name,
                              input$shelf_number,
                              "Batch Harvest")
@@ -368,17 +373,19 @@ server <- function(input, output, session) {
         write.csv(ledger_update_db, file = "./app_ledger.csv", row.names = F)
     
         inventory_update_list <- list(input$date_action,
-                                      paste0(toupper(input$batch_id),"_",input$bag_number),
+                                      if(!is.null(input_su_checkbox)){
+                                          paste0(toupper(input$batch_id),"_SU",input$input_su_checkboxes,"_", input$bag_number)
+                                      } else {paste0(toupper(input$batch_id),"_",input$bag_number)},
                                       toupper(input$batch_id),
                                       input$bag_number,
                                       toupper(input$strain_id),
                                       input$material_type,
                                       input$sample_weight, 
                                       input$freezer_name,
-                                      input$shelf_number)        
+                                      input$shelf_number)
 
         inventory_update_db <- rbind(inventory_db, inventory_update_list) %>% 
-            transform(Date_Added = as.character(Date_Added,"%m/%d/%y"))
+            transform(Date_Modified = as.character(Date_Modified,"%m/%d/%y"))
         
         write.csv(inventory_update_db, file = "./app_inventory.csv", row.names = F)        
         
@@ -593,7 +600,8 @@ server <- function(input, output, session) {
                     mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_")) %>%
                     ungroup() %>% 
                     select(., c(-PB_Number, -Bag_Number, -Strain, -Freezer_ID, -Shelf_Number)) %>% 
-                    select(., c(Date_Added, Type, Unique_Bag_ID, Weight, Material_type, Operator, Operator_Group, Purpose, Location ))
+                    select(., c(Date_Added, Type, Unique_Bag_ID, 
+                                Weight, Material_type, Operator, Operator_Group, Purpose, Location ))
                 } 
             })
     })
@@ -750,32 +758,56 @@ server <- function(input, output, session) {
                     filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
                            if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
                     mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
-                    select(., Unique_Bag_ID, Weight, Material_type, Location)
+                    select(., Unique_Bag_ID,Date_Modified, Weight, Material_type, Location)
             )
             
             if(is.null(input$flex_batch)){
+                # Inventory_by_Strain
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
-                        filter(., PB_Number %in% input$flex_batch) %>% 
-                        #group_by(., PB_Number) %>% #use for groups
+                        filter(., Strain %in% input$flex_strain) %>% 
+                        group_by(., Strain) %>% 
+                        mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" ) ) %>% #,
+                               #`Group Using Most` = ledger_db[ledger_db$Strain %in% input$flex_strain & ledger_db$Type == "Removal"]$Operator_Group) %>% 
                         summarise(., 
                                   `Number of Batches` = length(unique(PB_Number)),
                                   `Number of Bags` = length(unique(Unique_Bag_ID)),
                                 `Total Weight` = sum(Weight), 
-                                `Freezer Locations` = list(unique(Freezer_ID)),
+                                `Freezer Locations` = list(unique(Location)),
+                                #`Group Using Most` = mode(`Group Using Most`),
                                 .groups = 'drop') %>% 
-                        mutate(., across(.cols = everything(), as.character)) %>% 
+                        mutate(.,across(.cols = everything(), as.character),
+                                `Freezer Locations` = gsub("c(","", `Freezer Locations`, fixed = TRUE),
+                               `Freezer Locations` = gsub(")","", `Freezer Locations`, fixed = TRUE)) %>% 
                         pivot_longer(., cols = everything(), names_to = "Statistic", values_to = "Value"),
                     rownames = FALSE
                     
-                    #break this out into the else statement, silence the grouping arguemnt,
-                    # decide on the inventory_by_batch summaries.
-                    # WORK AREA ####
+                    
                     
                 )
                         
-                } else{
-                #render at batch level
+            } else{
+                # Inventory_by_batch
+                output$flex_summary <- DT::renderDataTable( 
+                    get(input$flex_database) %>% 
+                        filter(., PB_Number %in% input$flex_batch) %>% 
+                        mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
+                        group_by(., Unique_Bag_ID) %>% 
+                        mutate(.,`Number of Freeze-Thaws` = sum(ledger_db[PB_Number %in% input$flex_batch]$Type == "Removal")) %>% 
+                        summarise(., 
+                                  `Number of Batches` = length(unique(PB_Number)),
+                                  `Number of Bags` = length(unique(Unique_Bag_ID)),
+                                  `Total Weight` = sum(Weight), 
+                                  `Freezer Locations` = unique(Location),
+                                  `Number of Freeze-Thaws` = mean(`Number of Freeze-Thaws`),
+                                  .groups = 'drop') %>% 
+                        mutate(., across(.cols = everything(), as.character),
+                               `Freezer Locations` = gsub("c(","", `Freezer Locations`,fixed = TRUE),
+                               `Freezer Locations` = gsub(")","", `Freezer Locations`,fixed = TRUE)) %>% 
+                        pivot_longer(., cols = -c(Unique_Bag_ID), names_to = "Statistics", values_to = "Values") %>% 
+                        pivot_wider(., names_from = Unique_Bag_ID, values_from = Values),
+                    rownames = FALSE
+                )
             }
             
             #output$flex_plot <- renderPlotly()
@@ -801,6 +833,7 @@ server <- function(input, output, session) {
             
             
         } else if(input$flex_database == "ledger_db"){
+            # WORK AREA ####
             output$flex_table <- DT::renderDataTable(
                 get(input$flex_database) %>% 
                     filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
