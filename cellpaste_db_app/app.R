@@ -5,6 +5,7 @@ library(DT)
 library(ggplot2)
 library(shinydashboard)
 library(plotly)
+library(RColorBrewer)
 
 # Shiny App UI ####
 ui <- dashboardPage(
@@ -298,8 +299,7 @@ ui <- dashboardPage(
                             side = "right",
                             id = "run_chart",
                             tabPanel("Table", dataTableOutput("flex_table")),
-                            #tabPanel("Graph",plotlyOutput("flex_plot"))
-                            tabPanel("Graph", plotOutput("flex_plot"))
+                            tabPanel("Graph",plotlyOutput("flex_plot"))
                         )
                     )
             ),
@@ -768,6 +768,7 @@ server <- function(input, output, session) {
     observeEvent(c(input$flex_strain, input$flex_batch),{
         
         if(input$flex_database == "inventory_db"){
+            
             output$flex_table <- DT::renderDataTable(
                 options = list(autoWidth = FALSE),
                 {
@@ -779,6 +780,7 @@ server <- function(input, output, session) {
                 }
             )
             
+            #inventory_by_______
             if(is.null(input$flex_batch)){
                 # Inventory_by_Strain
                 output$flex_summary <- DT::renderDataTable( 
@@ -825,30 +827,25 @@ server <- function(input, output, session) {
                 )
             }
             
-            #output$flex_plot <- renderPlotly()
             
-            output$flex_plot <- renderPlot(
-                get(input$flex_database) %>% 
-                rowwise() %>% 
-                mutate(., Running_Tally = 
-                           if(Type == "Entry"){
-                               Weight * 1
-                           } else if(Type =="Removal") {
-                               Weight * -1
-                           } else {0}) %>% 
-                filter(., Type != "Balance") %>% 
-                filter(., Strain == input$s_overview_strain_id) %>% 
-                ggplot(., aes(x=Date_Added, y = Running_Tally, fill = Type)) +
-                geom_col(width = 0.9) +
-                scale_fill_brewer(palette = "Dark2") +
-                labs(title = paste0("Production History of ",input$s_overview_strain_id),
-                     x = "Cell Mass Changes",
-                     y = "Date Of Modification")
-            )
+            fig_flex_strain <-  get(input$flex_database) %>%
+                rowwise() %>%
+                filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
+                       if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
+                plot_ly(., x = ~PB_Number, 
+                        y = ~Weight, 
+                        color = ~as.factor(Bag_Number), 
+                        colors = brewer.pal(n = length(unique(get(input$flex_database)$Bag_Number)),name = "Set1"), 
+                        type = 'bar') %>% 
+                layout(yaxis = list(title = "Weight of Material (g)"), barmode = 'stack')
+            
+            output$flex_plot <- renderPlotly(fig_flex_strain)
+
+        
             
             
         } else if(input$flex_database == "ledger_db"){
-            # WORK AREA ####
+            
             output$flex_table <- DT::renderDataTable(
                 get(input$flex_database) %>% 
                     filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
@@ -857,7 +854,7 @@ server <- function(input, output, session) {
                     select(., Unique_Bag_ID, Strain, Type, Weight, Material_type, Location, Operator, Operator_Group, Purpose)
                 
             )
-            
+            # ledger_by________
             if(is.null(input$flex_batch)){ #fix table output, can this be batched into one statement?
                 #ledger_by_strain
                 output$flex_summary <- DT::renderDataTable( 
@@ -902,29 +899,26 @@ server <- function(input, output, session) {
             }
             
             
+            fig_flex_batch <- get(input$flex_database) %>% 
+                rowwise() %>% 
+                mutate(., Running_Tally = 
+                           if(Type == "Entry"){
+                               Weight * 1
+                           } else if(Type =="Removal") {
+                               Weight * -1
+                           } else {0}) %>% 
+                filter(., Type != "Balance") %>% 
+                filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
+                       if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
+                plot_ly(., x = ~Date_Added,
+                        y = ~Running_Tally,
+                        color = ~Type,
+                        colors = brewer.pal(n = length(unique(get(input$flex_database)$Bag_Number)),name = "Dark2"),
+                        type = 'bar') %>%  
+                layout(yaxis = list(title = "Weight of Modification"))
             
-            #output$flex_summary <- DT::renderDataTable()
+            output$flex_plot <- renderPlotly(fig_flex_batch)
             
-            #output$flex_plot <- renderPlotly()
-            
-            output$flex_plot <- renderPlot(
-                get(input$flex_database) %>% 
-                    rowwise() %>% 
-                    mutate(., Running_Tally = 
-                               if(Type == "Entry"){
-                                   Weight * 1
-                               } else if(Type =="Removal") {
-                                   Weight * -1
-                               } else {0}) %>% 
-                    filter(., Type != "Balance") %>% 
-                    filter(., Strain == input$flex_strain) %>% 
-                    ggplot(., aes(x=Date_Added, y = Running_Tally, fill = Type)) +
-                    geom_col(width = 0.9) +
-                    scale_fill_brewer(palette = "Dark2") +
-                    labs(title = paste0("Production History of ",input$flex_strain),
-                         x = "Cell Mass Changes",
-                         y = "Date Of Modification")
-            )
         }  
     })
     
