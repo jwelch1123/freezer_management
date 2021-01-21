@@ -17,10 +17,6 @@ ui <- dashboardPage(
             menuItem("Inventory & Ledger", tabName = 'inventory_ledger', icon = icon('boxes')),
             menuItem("Batch Input",tabName = "batch_input",icon = icon('plus-circle')),
             menuItem("Batch Modification",tabName = "batch_mod",icon = icon('exchange-alt')),
-            menuItem("Strain View",tabName = 'strain_view',icon = icon('binoculars')),
-            menuItem("Batch View",tabName = 'batch_view',icon = icon('layer-group')),
-            menuItem("Freezer View",tabName = 'freezer_view',icon = icon('snowflake')),
-            menuItem("Search",tabName = 'search',icon = icon('search')),
             menuItem("Flex",tabName = 'flex_page',icon = icon('search')),
             menuItem("Settings",tabName = 'settings',icon = icon('cog'))
         )
@@ -154,114 +150,7 @@ ui <- dashboardPage(
                     br(),
                     br()
             ),
-            # Strain Overview ####
-            tabItem(tabName = "strain_view",
-                    h1("Strain Information"),
-                    fluidRow(
-                      column( width = 4,
-                          selectizeInput(inputId = "s_overview_strain_id",
-                                 label = "Select Strain to View",
-                                 choices = NULL,
-                                 selected = NULL)
-                            ),
-                      column( width = 3,
-                           checkboxInput(inputId = "s_showtable",
-                                label = "Show Modification Table",
-                                value = FALSE)
-                            ),
-                      column( width = 3,
-                              selectInput(inputId = "s_show_other",
-                                            label = "Strain usage by:",
-                                            choices = c("Operator_Group","Operator","Location") ,
-                                            selected = "Operator_Group")
-                            )
-                      ),
-                    fluidRow(
-                      column(width = 8,
-                           plotOutput(outputId = "strain_overview_plot")
-                           ),
-                      column(width = 4,
-                            plotOutput(outputId = "strain_usage_plot"))
-                    ),
-                    br(),
-                    dataTableOutput("s_strainledgertable")
-            ),
-            # Batch Overview ####
-            tabItem(tabName = "batch_view",
-                    h1("Batch Information"),
-                    br(),
-                    br(),
-                    fluidRow(column(width = 3,
-                                  selectizeInput(inputId = "b_batch_id",
-                                                 label = "Select Batch to View",
-                                                 choices = NULL,
-                                                 selected = NULL),
-                                  checkboxInput(inputId = "b_limit_extant",
-                                                label = "Limit to Extant Batches",
-                                                value = TRUE),
-                                  checkboxInput(inputId = "b_showtable",
-                                                label = "Show History Table",
-                                                value = FALSE)),
-                    
-                           column(width = 3, valueBoxOutput('numb_containers_box')),
-
-                           column(width = 3, valueBoxOutput('total_weight_box')),
-
-                           column(width = 3, valueBoxOutput('numb_freeze_thaw_box'))
-                    ),
-                    
-                    fluidRow(
-                      column(width = 12,
-                             plotOutput(outputId = "batch_overview_plot")
-                      )
-                    ),
-                    fluidRow(
-                     column(width = 12,
-                            dataTableOutput("b_batch_history")
-                      )
-                    )
-            ),
-            # Freezer View ####
-            tabItem(tabName = "freezer_view",
-                    h1("Freezer View"),
-                    fluidRow(column(4,
-                                    selectizeInput(inputId = "freezer_choice",
-                                   label = "Select Freezer to View Contents",
-                                   choices = NULL,
-                                   selected = NULL))),
-                    fluidRow(column(8,
-                                    dataTableOutput("freezer_choice_table")))
-            ),
-            # Search ####
-            tabItem(tabName = "search",
-                    box(title = "Inputs",
-                        selectInput(inputId = "flex_timeframe",
-                                    label = "View Current inventory or All?",
-                                    choices = c("Current Inventory", "Overall Ledger"),
-                                    selected = "Current Inventory"),
-                        
-                        selectInput(inputId = "flex_batch_or_strain",
-                                    label = "View by Strain or Batch?",
-                                    choices = c("Strain","Batch"),
-                                    selected = NULL),
-                        
-                        selectizeInput(inputId = "flex_ids",
-                                       label = NULL,
-                                       choices = NULL,
-                                       selected = NULL,
-                                       multiple = TRUE)
-                    ),
-                    
-                    #box(title = "Stats",dataTableOutput("flex_summary")),
-                    box(title = "Tester",textOutput("test_text")),
-                    
-                    # tabBox(title = "Run Chart",
-                    #        side = "right",
-                    #        id = "run_chart",
-                    #        tabPanel("Table",dataTableOutput("flex_table") ),
-                    #        tabPanel("Graph",plotlyOutput("flex_plot")) 
-                    # ),
-            ),
+            
             # FlexPage ####
             tabItem(tabName = "flex_page",
                     fluidRow(
@@ -299,7 +188,9 @@ ui <- dashboardPage(
                             side = "right",
                             id = "run_chart",
                             tabPanel("Table", dataTableOutput("flex_table")),
-                            tabPanel("Graph",plotlyOutput("flex_plot"))
+                            tabPanel("Graph",
+                                     uiOutput( outputId = "reveal_daterange"),
+                                     plotlyOutput("flex_plot"))
                         )
                     )
             ),
@@ -347,7 +238,7 @@ server <- function(input, output, session) {
     ledger_db <- read_csv("./app_ledger.csv") %>% 
         transform(Date_Added = as.Date(Date_Added, "%m/%d/%y"))
     
-    # Render Inventory and Ledger ####
+    # Render Tables ####
     observeEvent(input$table_type, {
         output$selected_table <- DT::renderDataTable(options = list(autoWidth = FALSE),{
             if(input$table_type == "Current Inventory"){
@@ -490,23 +381,6 @@ server <- function(input, output, session) {
     updateSelectizeInput(session, "mod_op_group",
                          choices = ledger_db$Operator_Group,
                          selected ="", server = TRUE)
-    #Strains for Overview Graph
-    updateSelectizeInput(session, "s_overview_strain_id", 
-                         choices = ledger_db$Strain, 
-                         selected = "", server = TRUE)
-    #Batches for Batches Page, dependent on 
-    observeEvent(input$b_limit_extant,{
-        updateSelectizeInput(session, "b_batch_id",
-                          choices = if(input$b_limit_extant == FALSE){
-                              ledger_db$PB_Number
-                          }else if(input$b_limit_extant == TRUE){
-                              inventory_db$PB_Number},
-                          selected = "")
-    })
-    #Freezer View Page
-    updateSelectizeInput(session, 'freezer_choice',
-                         choices = inventory_db$Freezer_ID,
-                         selected = "", server = TRUE)
     
     #Flex selection
     observeEvent(c(input$flex_timeframe, input$flex_batch_or_strain) ,{
@@ -529,6 +403,7 @@ server <- function(input, output, session) {
     
 
     # Update Flex Page Selections
+    
     # working version: commented out so batches of different strains can be selected.
     # observeEvent(input$flex_batch, {
     #     if(is.null(input$flex_strain)){
@@ -540,6 +415,7 @@ server <- function(input, output, session) {
     #                              selected = "", server = TRUE)
     #     }
     # })
+    
     
     
     
@@ -560,206 +436,24 @@ server <- function(input, output, session) {
         updateSelectizeInput(session, "flex_batch",
                              choices = get(input$flex_database)$PB_Number,
                              selected = "", server = TRUE)
-    })
-
-    
-    # Strain Overview Graphics ####
-    
-    observeEvent(c(input$s_overview_strain_id, input$s_show_other), {
-
-        strain_overview_ggplot <- ledger_db %>% 
-            rowwise() %>% 
-            mutate(., Running_Tally = 
-                       if(Type == "Entry"){
-                           Weight * 1
-                       } else if(Type =="Removal") {
-                           Weight * -1
-                       } else {0}) %>% 
-            filter(., Type != "Balance") %>% 
-            filter(., Strain == input$s_overview_strain_id) %>% 
-            ggplot(., aes(x=Date_Added, y = Running_Tally, fill = Type)) +
-            geom_col(width = 0.9) +
-            scale_fill_brewer(palette = "Dark2") +
-            labs(title = paste0("Production History of ",input$s_overview_strain_id),
-                 x = "Cell Mass Changes",
-                 y = "Date Of Modification")
-        
-        output$strain_overview_plot <- renderPlot(strain_overview_ggplot)
-        
-
-        
-        
-        strain_usage_ggplot <- ledger_db %>% 
-            filter(., Type != "Balance") %>% 
-            filter(., Strain == input$s_overview_strain_id) %>% 
-            filter(., !is.na(Operator_Group)) %>%
-            mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_")) %>%
-            ggplot(., aes(x= Strain, fill = get(input$s_show_other))) +
-            geom_bar(stat = "count", width = 0.5) +
-            scale_fill_brewer(palette = "Set2") +
-            labs(title = paste0("Usage of ", input$s_overview_strain_id," by ", input$s_show_other),
-                 x = input$s_overview_strain_id,
-                 y = paste0("Usage by ", input$s_show_other))
-        
-        output$strain_usage_plot <- renderPlot((strain_usage_ggplot))
-        
-    })
-    
-    observeEvent(input$s_showtable,{
-        output$s_strainledgertable <- DT::renderDataTable({
-            if(input$s_showtable){
-                ledger_db %>% 
-                    rowwise() %>% 
-                    filter(., Type != "Balance") %>% 
-                    filter(., Strain == input$s_overview_strain_id) %>% 
-                    mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_")) %>%
-                    ungroup() %>% 
-                    select(., c(-PB_Number, -Bag_Number, -Strain, -Freezer_ID, -Shelf_Number)) %>% 
-                    select(., c(Date_Added, Type, Unique_Bag_ID, 
-                                Weight, Material_type, Operator, Operator_Group, Purpose, Location ))
-                } 
+        if (input$flex_database == 'ledger_db') {
+            output$reveal_daterange <- renderUI({
+                dateRangeInput(inputId = "flex_daterange",
+                               label = "Date Range to View")
             })
-    })
-    
-    # Batch Overview Graphics ####
-    observeEvent(input$b_batch_id, {
-        
-        output$numb_containers_box <- renderValueBox({
-            batch_numb_containers <- ledger_db %>%
-                group_by(., PB_Number) %>%
-                summarise(., count = n(), .groups = 'drop') %>%
-                filter(., PB_Number == input$b_batch_id) %>%
-                pull()
+        }
             
-            valueBox(value = batch_numb_containers,
-                     subtitle = "Number of Containers",
-                     icon = icon("box-open"),
-                     color = 'navy')
-        })
-        
-        output$total_weight_box <- renderValueBox({
-            total_weight <- ledger_db %>% 
-                group_by(., PB_Number) %>% 
-                filter(., Type == "Entry") %>% 
-                summarise(., Total_Weight = sum(), .groups = 'drop') %>% 
-                filter(., PB_Number == input$b_batch_id) %>% 
-                pull()
-            
-            valueBox(subtitle = "Total Weight",
-                     value = total_weight,
-                     icon = icon('weight-hanging'),
-                     color = 'light-blue')
-        })
-                
-        output$numb_freeze_thaw_box <- renderValueBox({
-            freeze_thaws <- ledger_db %>% 
-                group_by(., PB_Number) %>% 
-                filter(., Type == "Removal") %>% 
-                summarise(., Total_Weight = n(), .groups = 'drop') %>% 
-                filter(., PB_Number == input$b_batch_id) %>% 
-                pull()
-            
-            valueBox(subtitle = 'Freeze-Thaws',
-                     value = freeze_thaws,
-                     icon = icon('snowflake'),
-                     color = 'blue')
-        })
-        
-        batch_overview_ggplot <- ledger_db %>% 
-            rowwise() %>% 
-            mutate(., Running_Tally = 
-                       if(Type == "Entry"){
-                           Weight * 1
-                       } else if(Type =="Removal") {
-                           Weight * -1
-                       } else {0}) %>% 
-            filter(., Type != "Balance") %>% 
-            filter(., PB_Number == input$b_batch_id) %>% 
-            ggplot(., aes(x=Date_Added, y = Running_Tally, fill = Type)) +
-            geom_col(width = 0.9) +
-            scale_fill_brewer(palette = "Dark2") +
-            labs(title = paste0("Production History of ",input$b_batch_id),
-                 x = "Cell Mass Changes",
-                 y = "Date Of Modification")
-        output$batch_overview_plot <- renderPlot(batch_overview_ggplot)
     })
 
-    observeEvent(input$b_showtable,{
-        output$b_batch_history <- DT::renderDataTable({
-            if(input$b_showtable){
-                ledger_db %>% 
-                    rowwise() %>% 
-                    filter(., PB_Number == input$b_batch_id) %>% 
-                    mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_")) %>%
-                    ungroup() %>% 
-                    select(., c(-PB_Number, -Bag_Number, -Freezer_ID, -Shelf_Number)) %>% 
-                    select(., c(Date_Added, Type, Unique_Bag_ID, Weight, 
-                                Operator, Operator_Group, Purpose, Location ))
-            } 
-        })
-    })
-    
-    # Freezer View Graphics ####
-    observeEvent(input$freezer_choice,{
-        output$freezer_choice_table <- DT::renderDataTable({
-            inventory_db %>% 
-                filter(., Freezer_ID == input$freezer_choice) %>% 
-                mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_")) %>% 
-                select(., c(Date_Modified, Unique_Bag_ID, Location, 
-                            Material_type, Weight))
-        })
-    })
-    
-    # Search Page ####
-    #testing - delete me
-    output$test_text <- renderText(c(input$flex_timeframe,input$flex_batch_or_strain))
-
-    observeEvent(input$flex_ids, {
-        # make it easy to handle
-        choice <- switch (paste0(input$flex_timeframe,"_",input$flex_batch_or_strain),
-                          "Current Inventory_Strain" = "I_S",
-                          "Overall Ledger_Strain" = "L_S",
-                          "Current Inventory_Batch" = "I_B",
-                          "Overall Ledger_Batch" = "L_B"
-        ) # can I load the inputs into a list? reactiveValuesToList()?
-
-        flex_database <- switch (input$flex_timeframe,
-                       "Current Inventory" = inventory_db,
-                       "Overall Ledger" = ledger_db
-                       )
-
-        flex_group <- input$flex_strain_or_batch #rewrite this
-
-
-        #render summary table
-        output$flex_table <- DT::renderDataTable({
-            flex_database %>%
-                filter(., Strain %in% input$flex_ids | Batch %in% input$flex_ids) %>%
-                mutate(., if(flex_group == "Batch"){"hi"}) %>%
-                group_by(., flex_group)
-
-
-        })
-
-        #summary inventory _ batch
-        output$flex_table <- DT::renderDataTable({
-            flex_database %>%
-                filter(., Batch %in% input$flex_ids)
-
-
-        })
-
-        freeze_thaws <- ledger_db %>%
-            group_by(., PB_Number) %>%
-            filter(., Type == "Removal") %>%
-            summarise(., Total_Weight = n(), .groups = 'drop') %>%
-            filter(., PB_Number == input$b_batch_id) %>%
-            pull()
-
+    observeEvent(c(input$flex_strain, input$flex_batch),{
+        flex_date_range <- get(input$flex_database) %>% 
+            filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
+                   if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>%
+            pull(if (input$flex_database == "ledger_db") Date_Added else Date_Modified )
         
-        # observe tab choice
-            # render run chart
-            # render run table 
+        updateDateRangeInput(session, inputId = "flex_daterange",
+                             start = min(flex_date_range),
+                             end = max(flex_date_range))
     })
     
     # Flex Page Graphics ####
@@ -866,6 +560,7 @@ server <- function(input, output, session) {
                                   `Strain` = unique(Strain)[which.max(tabulate(match(Strain, unique(Strain))))],
                                   `Number of Batches Produced` = length(unique(PB_Number[Type == 'Removal'])),
                                   `Total Weight Produced` = sum(Weight[Type == 'Entry']), 
+                                  `Total Weight Used` = sum(Weight[Type == 'Removal']),
                                   `Group Using Most` = unique(Operator_Group[Type == 'Removal'])[which.max(tabulate(match(Operator_Group, unique(Operator_Group))))],
                                   `Operator Using Most` = unique(Operator[Type == 'Removal'])[which.max(tabulate(match(Operator, unique(Operator))))],
                                   .groups = 'drop') %>% 
@@ -915,7 +610,8 @@ server <- function(input, output, session) {
                         color = ~Type,
                         colors = brewer.pal(n = length(unique(get(input$flex_database)$Bag_Number)),name = "Dark2"),
                         type = 'bar') %>%  
-                layout(yaxis = list(title = "Weight of Modification"))
+                layout(yaxis = list(title = "Weight of Modification"),
+                       xaxis = list(range = c(input$flex_daterange[1], input$flex_daterange[2])))
             
             output$flex_plot <- renderPlotly(fig_flex_batch)
             
@@ -987,11 +683,6 @@ server <- function(input, output, session) {
     })
     
     
-    # Spacer ####
-    
-    
-    
-    
     # Notes #### 
         #take the ledger data table
         #graph with line for current amount at that time, and bar for inputs/outputs?
@@ -1004,8 +695,8 @@ server <- function(input, output, session) {
     # Add table reset option.
     
     
-    # Other? ####
-}
+    # End ####
+} 
 
 
 # Run the application 
