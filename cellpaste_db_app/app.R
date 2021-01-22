@@ -17,7 +17,7 @@ ui <- dashboardPage(
             menuItem("Inventory & Ledger", tabName = 'inventory_ledger', icon = icon('boxes')),
             menuItem("Batch Input",tabName = "batch_input",icon = icon('plus-circle')),
             menuItem("Batch Modification",tabName = "batch_mod",icon = icon('exchange-alt')),
-            menuItem("Flex",tabName = 'flex_page',icon = icon('search')),
+            menuItem("Viewer",tabName = 'flex_page',icon = icon('search')),
             menuItem("Settings",tabName = 'settings',icon = icon('cog'))
         )
     ),
@@ -153,6 +153,7 @@ ui <- dashboardPage(
             
             # FlexPage ####
             tabItem(tabName = "flex_page",
+                    h1("Strain and Batch Viewer"),
                     fluidRow(
                         box(title = "Inputs",
                             width = 4,
@@ -179,7 +180,10 @@ ui <- dashboardPage(
                             )
                         ),
                         
-                        box(title = "Stats", dataTableOutput("flex_summary"))
+                        box(title = "Stats",
+                            width = 7,
+                            dataTableOutput("flex_summary")
+                            )
                     ),
                     fluidRow(
                         tabBox(
@@ -383,7 +387,7 @@ server <- function(input, output, session) {
                          selected ="", server = TRUE)
     
     #Flex selection
-    observeEvent(c(input$flex_timeframe, input$flex_batch_or_strain) ,{
+    observeEvent(c(input$flex_timeframe, input$flex_batch_or_strain) ,{ # what is this ####
         updateSelectizeInput(session, 'flex_ids',
                              choices = if(input$flex_batch_or_strain == "Batch"){
                                  if(input$flex_timeframe == "Current Inventory"){
@@ -459,7 +463,7 @@ server <- function(input, output, session) {
     # Flex Page Graphics ####
     
     
-    observeEvent(c(input$flex_strain, input$flex_batch),{
+    observeEvent(c(input$flex_strain, input$flex_batch, input$flex_database),{
         
         if(input$flex_database == "inventory_db"){
             
@@ -470,7 +474,7 @@ server <- function(input, output, session) {
                     filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
                            if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
                     mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
-                    select(., Unique_Bag_ID,Date_Modified, Weight, Material_type, Location)
+                    select(., Unique_Bag_ID,Date_Modified, Weight, Material_Type, Location)
                 }
             )
             
@@ -529,8 +533,15 @@ server <- function(input, output, session) {
                 plot_ly(., x = ~PB_Number, 
                         y = ~Weight, 
                         color = ~as.factor(Bag_Number), 
-                        colors = brewer.pal(n = length(unique(get(input$flex_database)$Bag_Number)),name = "Set1"), 
-                        type = 'bar') %>% 
+                        colors = brewer.pal(8, name = "Set3")[1:length(unique(get(input$flex_database)$Bag_Number))],
+                        type = 'bar',
+                        marker = list(line = list(width = 1, color = "#000000")),
+                        hoverinfo = 'text',
+                        text = ~paste('</br> Unique ID: ', Unique_Bag_ID,
+                                      '</br> Location: ', Freezer_ID, "_", Shelf_Number,
+                                      '</br> Weight: ', Weight,"(g)",
+                                      '</br> Material Type: ', Material_Type)
+                        ) %>% 
                 layout(yaxis = list(title = "Weight of Material (g)"), barmode = 'stack')
             
             output$flex_plot <- renderPlotly(fig_flex_strain)
@@ -545,7 +556,7 @@ server <- function(input, output, session) {
                     filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
                            if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
                     mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
-                    select(., Unique_Bag_ID, Strain, Type, Weight, Material_type, Location, Operator, Operator_Group, Purpose)
+                    select(., Unique_Bag_ID, Strain, Type, Weight, Material_Type, Location, Operator, Operator_Group, Purpose)
                 
             )
             # ledger_by________
@@ -608,8 +619,17 @@ server <- function(input, output, session) {
                 plot_ly(., x = ~Date_Added,
                         y = ~Running_Tally,
                         color = ~Type,
-                        colors = brewer.pal(n = length(unique(get(input$flex_database)$Bag_Number)),name = "Dark2"),
-                        type = 'bar') %>%  
+                        colors = rev(brewer.pal(n = 8,name = "Set1")[1:2]),
+                        type = 'bar',
+                        marker = list(line = list(width = 1, color = "#000000")),
+                        hoverinfo = 'text',
+                        text = ~paste('</br> Date of Action: ', Date_Added,
+                                      '</br> Unique_ID: ', Unique_Bag_ID, 
+                                      '</br> Freezer Location: ', Freezer_ID, "_", Shelf_Number,
+                                      '</br> Operator: ', Operator,
+                                      '</br> Weight: ', Weight,"(g)")
+                        
+                        ) %>% 
                 layout(yaxis = list(title = "Weight of Modification"),
                        xaxis = list(range = c(input$flex_daterange[1], input$flex_daterange[2])))
             
