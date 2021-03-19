@@ -14,10 +14,10 @@ ui <- dashboardPage(
     dashboardHeader(title = "Cell Paste Database"),
     dashboardSidebar( id = "", 
         sidebarMenu(
+            menuItem("Viewer",tabName = 'flex_page',icon = icon('search')),
             menuItem("Inventory & Ledger", tabName = 'inventory_ledger', icon = icon('boxes')),
             menuItem("Batch Input",tabName = "batch_input",icon = icon('plus-circle')),
             menuItem("Batch Modification",tabName = "batch_mod",icon = icon('exchange-alt')),
-            menuItem("Viewer",tabName = 'flex_page',icon = icon('search')),
             menuItem("Settings",tabName = 'settings',icon = icon('cog'))
         )
     ),
@@ -151,50 +151,66 @@ ui <- dashboardPage(
                     br()
             ),
             
-            # FlexPage ####
+            # Viewer ####
             tabItem(tabName = "flex_page",
                     h1("Strain and Batch Viewer"),
                     fluidRow(
-                        box(title = "Inputs",
-                            width = 4,
-                            selectInput(
-                                inputId = "flex_database",
-                                label = "View Current or All Information?",
-                                choices = c("Current Inventory" = "inventory_db",
-                                            "Overall Ledger" = "ledger_db"),
-                                selected = "Current Inventory"),
-                            
-                            selectizeInput(
-                                inputId = "flex_strain",
-                                label = "Select one or more Strains",
-                                choices = NULL,
-                                selected = NULL,
-                                multiple = TRUE),
-                            
-                            selectizeInput(
-                                inputId = "flex_batch",
-                                label = "Select one or more Batches",
-                                choices = NULL,
-                                selected = NULL,
-                                multiple = TRUE
-                            )
-                        ),
-                        
-                        box(title = "Stats",
-                            width = 7,
-                            dataTableOutput("flex_summary")
-                            )
+                               box(
+                                   title = "Inputs",
+                                   width = 4,
+                                   selectInput(
+                                       inputId = "flex_database",
+                                       label = "View Current or All Information?",
+                                       choices = c("Current Inventory" = "inventory_db",
+                                                   "Overall Ledger" = "ledger_db"),
+                                       selected = "Current Inventory"
+                                   ),
+                                   
+                                   selectizeInput(
+                                       inputId = "flex_strain",
+                                       label = "Select one or more Strains",
+                                       choices = NULL,
+                                       selected = NULL,
+                                       multiple = TRUE
+                                   ),
+                                   
+                                   selectizeInput(
+                                       inputId = "flex_batch",
+                                       label = "Select one or more Batches",
+                                       choices = NULL,
+                                       selected = NULL,
+                                       multiple = TRUE
+                                   ),
+                                   selectizeInput(
+                                       inputId = "filter_groups",
+                                       label = "Select Group to Filter",
+                                       choices = NULL,
+                                       selected = NULL,
+                                       multiple = TRUE
+                                   ),
+                                   selectizeInput(
+                                       inputId = "filter_values",
+                                       label = "Select Values to Filter",
+                                       choices = NULL,
+                                       selected = NULL,
+                                       multiple = TRUE
+                                   ),
+                               ),
+                               box(title = "Quick Look",
+                                   width = 8,
+                                   DT::dataTableOutput("flex_summary")
+                        )
                     ),
                     fluidRow(
                         tabBox(
-                            width = 11,
+                            width = 12,
                             title = "Run Chart",
                             side = "right",
                             id = "run_chart",
-                            tabPanel("Table", dataTableOutput("flex_table")),
                             tabPanel("Graph",
-                                     uiOutput( outputId = "reveal_daterange"),
-                                     plotlyOutput("flex_plot"))
+                                     plotlyOutput("flex_plot")),
+                            tabPanel("Table", dataTableOutput("flex_table"))
+                            
                         )
                     )
             ),
@@ -214,6 +230,7 @@ ui <- dashboardPage(
                     br(),
                     "Reimporting old databases is not supported.",
                     br(),
+                    hr(), 
                     
                     checkboxInput(inputId = 'ledger_reset',
                                   label = 'Include Ledger in reset?',
@@ -234,17 +251,22 @@ ui <- dashboardPage(
 
 # Shiny App Server ####
 server <- function(input, output, session) {
+  
     # Import statements ####
-    inventory_db <- read_csv("./app_inventory.csv") %>% 
+    inventory_db <- read_csv("./app_inventory.csv",
+                             col_types = "cccnccncn") %>% 
         transform(Date_Modified = as.Date(Date_Modified,"%m/%d/%y"))
     
     
-    ledger_db <- read_csv("./app_ledger.csv") %>% 
+    ledger_db <- read_csv("./app_ledger.csv",
+                          col_types = "cccncncccccnc") %>% 
         transform(Date_Added = as.Date(Date_Added, "%m/%d/%y"))
     
-    # Render Tables ####
+    # Render Static Tables ####
     observeEvent(input$table_type, {
-        output$selected_table <- DT::renderDataTable(options = list(autoWidth = FALSE),{
+        output$selected_table <- DT::renderDataTable(
+          options = list(autoWidth = FALSE,
+                         scrollX = T),{
             if(input$table_type == "Current Inventory"){
                 inventory_db
             } else if (input$table_type == "Overall Ledger"){
@@ -302,9 +324,9 @@ server <- function(input, output, session) {
     # Modification Update ####
     observeEvent(input$mod_update_entry,{
         
+        # Catches empty submissions so they don't get uploaded to database
         if(input$mod_unique_batch_id == ""){
             session$reload()
-            #don't love this solution but it works
         }
         
         inventory_update_row <- (inventory_db %>%  
@@ -386,104 +408,168 @@ server <- function(input, output, session) {
                          choices = ledger_db$Operator_Group,
                          selected ="", server = TRUE)
     
-    #Flex selection
-    observeEvent(c(input$flex_timeframe, input$flex_batch_or_strain) ,{ # what is this ####
-        updateSelectizeInput(session, 'flex_ids',
-                             choices = if(input$flex_batch_or_strain == "Batch"){
-                                 if(input$flex_timeframe == "Current Inventory"){
-                                     inventory_db$PB_Number
-                                 } else if(input$flex_timeframe == "Overall Ledger"){
-                                     ledger_db$PB_Number
-                                 }
-                             } else if(input$flex_batch_or_strain == "Strain"){
-                                 if(input$flex_timeframe == "Current Inventory"){
-                                     inventory_db$Strain
-                                 } else if(input$flex_timeframe == "Overall Ledger"){
-                                     ledger_db$Strain
-                                 }
-                             } else{""},
-                             label = paste0("Select ",input$flex_batch_or_strain))
-    })
-    
-
-    # Update Flex Page Selections
-    
-    # working version: commented out so batches of different strains can be selected.
-    # observeEvent(input$flex_batch, {
-    #     if(is.null(input$flex_strain)){
-    #         updateSelectizeInput(session, "flex_strain",
-    #                              choices = get(input$flex_database) %>%
-    #                                  filter(.,if(!is.null(input$flex_batch)){PB_Number == input$flex_batch
-    #                                      } else {!is.na(Strain)}) %>%
-    #                                  pull(Strain),
-    #                              selected = "", server = TRUE)
-    #     }
-    # })
-    
-    
-    
-    
-    observeEvent(input$flex_strain,{
-        if(is.null(input$flex_batch)){
-            updateSelectizeInput(session, "flex_batch",
-                                 choices = get(input$flex_database) %>%
-                                     filter(., if(!is.null(input$flex_strain)){Strain == input$flex_strain
-                                         } else {!is.na(PB_Number)}) %>%
-                                     pull(PB_Number),
-                                 selected = "", server = TRUE)
+    ## Update Viewer Page Selections
+    # updates batch/strain when database is changed
+    observeEvent(input$flex_database, { #needs to update choices when filled?
+        if (!is.null(input$flex_batch)) {
+            if (!(input$flex_batch %in% get(input$flex_database)$PB_Number)) {
+                updateSelectizeInput(
+                    session,
+                    "flex_batch",
+                    choices = get(input$flex_database)$PB_Number,
+                    selected = "",
+                    server = TRUE
+                )
+            } else(
+                updateSelectizeInput(
+                    session,
+                    "flex_batch",
+                    choices = get(input$flex_database)$PB_Number,
+                    selected = input$flex_batch,
+                    server = TRUE
+                )
+            )
+        }
+        if (!is.null(input$flex_strain)) {
+            print("strain not null")
+            if (!(input$flex_strain %in% get(input$flex_database)$Strain)) {
+                updateSelectizeInput(
+                    session,
+                    "flex_strain",
+                    choices = get(input$flex_database)$Strain,
+                    selected = "",
+                    server = TRUE
+                )
+                print("updated strain to new database")
+            } else(
+                updateSelectizeInput(
+                    session,
+                    "flex_strain",
+                    choices = get(input$flex_database)$Strain,
+                    selected = input$flex_strain,
+                    server = TRUE
+                )
+            ) 
+        }
+        if(is.null(input$flex_strain) & is.null(input$flex_batch)){
+            updateSelectizeInput(
+                session,
+                "flex_strain",
+                choices = get(input$flex_database)$Strain,
+                selected = "",
+                server = TRUE
+            )
+            updateSelectizeInput(
+                session,
+                "flex_batch",
+                choices = get(input$flex_database)$PB_Number,
+                selected = "",
+                server = TRUE
+            )
         }
     })
+    
+    # update Batch when strain is changed
+    observeEvent(input$flex_strain, {
+        updateSelectizeInput(
+            session,
+            "flex_batch",
+            choices = get(input$flex_database) %>%
+                filter(., if (!is.null(input$flex_strain)) {
+                    `Strain` %in% input$flex_strain
+                } else {
+                    !is.na(PB_Number)
+                }) %>%
+                pull(PB_Number),
+            selected = "",
+            server = TRUE
+        )
+    }, ignoreNULL = F)
+    
+    # update Strain when batch is changed
+    observeEvent(input$flex_batch, {
+        updateSelectizeInput(
+            session,
+            "flex_strain",
+            choices = get(input$flex_database) %>%
+                filter(., if (!is.null(input$flex_batch)) {
+                    `PB_Number` %in% input$flex_batch
+                } else {
+                    !is.na(Strain)
+                }) %>%
+                pull(Strain),
+            selected = "",
+            server = TRUE
+        )
+    }, ignoreNULL = F)
+    
+    # update filters
     observeEvent(input$flex_database,{
-        updateSelectizeInput(session, "flex_strain",
-                             choices = get(input$flex_database)$Strain,
-                             selected = "", server = TRUE)
-        updateSelectizeInput(session, "flex_batch",
-                             choices = get(input$flex_database)$PB_Number,
-                             selected = "", server = TRUE)
-        if (input$flex_database == 'ledger_db') {
-            output$reveal_daterange <- renderUI({
-                dateRangeInput(inputId = "flex_daterange",
-                               label = "Date Range to View")
-            })
-        }
-            
+      
+            updateSelectizeInput(session,
+                                 "filter_groups",
+                                 choices = if (input$flex_database == "inventory_db"){
+                                     c("Material Type" = "Material_Type",
+                                       "Freezer" = "Freezer_ID")
+                                 }else{
+                                     c(
+                                         "Modification Type" = "Type",
+                                         "Material Type" = "Material_Type",
+                                         "Operator",
+                                         "Operator Group" = "Operator_Group",
+                                         "Freezer" = "Freezer_ID"
+                                     )},
+                                 selected = "",
+                                 server = TRUE)
     })
 
-    observeEvent(c(input$flex_strain, input$flex_batch),{
-        flex_date_range <- get(input$flex_database) %>% 
-            filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
-                   if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>%
-            pull(if (input$flex_database == "ledger_db") Date_Added else Date_Modified )
-        
-        updateDateRangeInput(session, inputId = "flex_daterange",
-                             start = min(flex_date_range),
-                             end = max(flex_date_range))
+    observeEvent(c(input$flex_database,input$filter_groups),{
+        filter_value_choices <- c()
+        for(x in input$filter_groups){
+            filter_value_choices <- append(filter_value_choices,unique(get(input$flex_database) %>% pull(x)))
+        }
+        updateSelectizeInput(session,
+                             "filter_values",
+                             choices = filter_value_choices,
+                             selected = "",
+                             server = TRUE)
     })
     
     # Flex Page Graphics ####
     
+    match_selection <- function(x) {
+      return(x %in% input$filter_values)
+    }
     
-    observeEvent(c(input$flex_strain, input$flex_batch, input$flex_database),{
-        
+    observeEvent(c(input$flex_strain, input$flex_batch, input$flex_database, input$filter_values, input$filter_groups),{
+
         if(input$flex_database == "inventory_db"){
-            
+
             output$flex_table <- DT::renderDataTable(
                 options = list(autoWidth = FALSE),
                 {
                 get(input$flex_database) %>% 
                     filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
-                           if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
+                           if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}
+                           ) %>% 
+                    filter(., if(!is.null(input$filter_values)){
+                      if_any(input$filter_groups, match_selection)
+                      #if_all(input$filter_groups, match_selection)
+                      }else{!is.na(Unique_Bag_ID)}) %>% 
                     mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
                     select(., Unique_Bag_ID,Date_Modified, Weight, Material_Type, Location)
                 }
             )
-            
-            #inventory_by_______
-            if(is.null(input$flex_batch)){
-                # Inventory_by_Strain
+    
+            # Inventory_by_Strain
+            if(!is.null(input$flex_strain)){
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
                         filter(., Strain %in% input$flex_strain) %>% 
+                        filter(., if(!is.null(input$filter_values)){
+                          if_any(input$filter_groups, match_selection)
+                          #if_all(input$filter_groups, match_selection)
+                          }else{!is.na(Unique_Bag_ID)}) %>% 
                         group_by(., Strain) %>% 
                         mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" ) ) %>%
                         summarise(., 
@@ -495,44 +581,72 @@ server <- function(input, output, session) {
                         mutate(.,across(.cols = everything(), as.character),
                                 `Freezer Locations` = gsub("c(","", `Freezer Locations`, fixed = TRUE),
                                `Freezer Locations` = gsub(")","", `Freezer Locations`, fixed = TRUE)) %>% 
-                        pivot_longer(., cols = everything(), names_to = "Statistic", values_to = "Value"),
-                    rownames = FALSE
-                    
+                        group_by(., Strain) %>% 
+                        pivot_longer(., cols = -c(Strain), names_to = "Statistic", values_to = "Value") %>% 
+                        pivot_wider(.,
+                                    id_cols = c(`Statistic`),
+                                    names_from = `Strain` ,
+                                    values_from = `Value`),
+                    rownames = FALSE,
+                    options = list(scrollX = T, pageLength = 8)
                 )
-                        
-            } else{
-                # Inventory_by_batch
+            } 
+            # Inventory_by_batch
+            if(!is.null(input$flex_batch)){
+                
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
-                        filter(., PB_Number %in% input$flex_batch) %>% 
+                        filter(., PB_Number %in% input$flex_batch) %>%
+                        filter(., if(!is.null(input$filter_values)){
+                          if_any(input$filter_groups, match_selection)
+                          #if_all(input$filter_groups, match_selection)
+                        }else{!is.na(Unique_Bag_ID)}) %>% 
                         mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
                         group_by(., Unique_Bag_ID) %>% 
-                        mutate(.,`Number of Freeze-Thaws` = sum(ledger_db[PB_Number %in% input$flex_batch]$Type == "Removal")) %>% 
                         summarise(., 
                                   `Strain` = unique(Strain)[which.max(tabulate(match(Strain, unique(Strain))))],
                                   `Number of Batches` = length(unique(PB_Number)),
                                   `Number of Bags` = length(unique(Unique_Bag_ID)),
                                   `Total Weight` = sum(Weight), 
                                   `Freezer Locations` = unique(Location),
-                                  `Number of Freeze-Thaws` = mean(`Number of Freeze-Thaws`),
                                   .groups = 'drop') %>% 
                         mutate(., across(.cols = everything(), as.character),
                                `Freezer Locations` = gsub("c(","", `Freezer Locations`,fixed = TRUE),
                                `Freezer Locations` = gsub(")","", `Freezer Locations`,fixed = TRUE)) %>% 
                         pivot_longer(., cols = -c(Unique_Bag_ID), names_to = "Statistics", values_to = "Values") %>% 
                         pivot_wider(., names_from = Unique_Bag_ID, values_from = Values),
-                    rownames = FALSE
+                    rownames = FALSE,
+                    options = list(scrollX = T, pageLength = 8)
                 )
             }
-            
+            #Inventory, no strain, no batch
+            if(is.null(input$flex_batch) & is.null(input$flex_strain)){
+                output$flex_summary <- DT::renderDataTable( 
+                    get(input$flex_database) %>% 
+                      filter(., if(!is.null(input$filter_values)){
+                        if_any(input$filter_groups, match_selection)
+                        #if_all(input$filter_groups, match_selection)
+                      }else{!is.na(Unique_Bag_ID)}) %>% 
+                        group_by(., PB_Number) %>% 
+                        summarise(., 
+                                  `Strains Available` = unique(Strain),
+                                  `Total Weight Avalible` = sum(Weight),
+                                  .groups = 'drop'),
+                    options = list(scrollX = T, pageLength = 8)
+                )
+            }
             
             fig_flex_strain <-  get(input$flex_database) %>%
                 rowwise() %>%
                 filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
                        if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
-                plot_ly(., x = ~PB_Number, 
+                filter(., if(!is.null(input$filter_values)){
+                  if_any(input$filter_groups, match_selection)
+                  #if_all(input$filter_groups, match_selection)
+                }else{!is.na(Unique_Bag_ID)}) %>% 
+                plot_ly(., x = if(is.null(input$flex_batch)) ~Strain else ~PB_Number, 
                         y = ~Weight, 
-                        color = ~as.factor(Bag_Number), 
+                        color = if(is.null(input$flex_batch)) ~PB_Number else ~as.factor(Bag_Number), 
                         colors = brewer.pal(8, name = "Set3")[1:length(unique(get(input$flex_database)$Bag_Number))],
                         type = 'bar',
                         marker = list(line = list(width = 1, color = "#000000")),
@@ -555,16 +669,24 @@ server <- function(input, output, session) {
                 get(input$flex_database) %>% 
                     filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
                            if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
+                    filter(., if(!is.null(input$filter_values)){
+                      if_any(input$filter_groups, match_selection)
+                      #if_all(input$filter_groups, match_selection)
+                    }else{!is.na(Unique_Bag_ID)}) %>% 
                     mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
                     select(., Unique_Bag_ID, Strain, Type, Weight, Material_Type, Location, Operator, Operator_Group, Purpose)
                 
             )
-            # ledger_by________
-            if(is.null(input$flex_batch)){ #fix table output, can this be batched into one statement?
-                #ledger_by_strain
+            
+            # Ledger by Strain
+            if(!is.null(input$flex_strain)){ 
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
                         filter(., Strain %in% input$flex_strain) %>% 
+                        filter(., if(!is.null(input$filter_values)){
+                          if_any(input$filter_groups, match_selection)
+                          #if_all(input$filter_groups, match_selection)
+                        }else{!is.na(Unique_Bag_ID)}) %>% 
                         group_by(., Strain) %>% 
                         mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
                         summarise(.,
@@ -572,38 +694,74 @@ server <- function(input, output, session) {
                                   `Number of Batches Produced` = length(unique(PB_Number[Type == 'Removal'])),
                                   `Total Weight Produced` = sum(Weight[Type == 'Entry']), 
                                   `Total Weight Used` = sum(Weight[Type == 'Removal']),
-                                  `Group Using Most` = unique(Operator_Group[Type == 'Removal'])[which.max(tabulate(match(Operator_Group, unique(Operator_Group))))],
-                                  `Operator Using Most` = unique(Operator[Type == 'Removal'])[which.max(tabulate(match(Operator, unique(Operator))))],
+                                  `Group Using Most` = unique(Operator_Group[Type == 'Removal'])[which.max(tabulate(match(Operator_Group[Type == 'Removal'], unique(Operator_Group[Type == 'Removal']))))],
+                                  `Operator Using Most` = unique(Operator[Type == 'Removal'])[which.max(tabulate(match(Operator[Type == 'Removal'], unique(Operator[Type == 'Removal']))))],
                                   .groups = 'drop') %>% 
                         mutate(., across(.cols = everything(), as.character)) %>% 
-                        pivot_longer(., cols = everything(), names_to = "Statistic", values_to = "Value"),
-                    rownames = FALSE
+                        group_by(., Strain) %>% 
+                        pivot_longer(., 
+                                    cols = -c(Strain),
+                                    #cols = everything(),
+                                    names_to = "Statistic",
+                                    values_to = "Value"
+                                     ) %>% 
+                        pivot_wider(.,
+                                    id_cols = c(`Statistic`),
+                                    names_from = `Strain` ,
+                                    values_from = `Value`),
+                    rownames = FALSE,
+                    options = list(scrollX = T, pageLength = 8)
                     
                 )
                 
                 
-            } else{ #fix the table output
-                #ledger_by_batch
+            } 
+            # Ledger by batch
+            if(!is.null(input$flex_batch)){ 
+                
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
                         filter(., PB_Number %in% input$flex_batch) %>% 
+                        filter(., if(!is.null(input$filter_values)){
+                          if_any(input$filter_groups, match_selection)
+                          #if_all(input$filter_groups, match_selection)
+                        }else{!is.na(Unique_Bag_ID)}) %>% 
                         mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
                         group_by(., Unique_Bag_ID) %>% 
-                        mutate(.,`Number of Freeze-Thaws` = sum(ledger_db[PB_Number %in% input$flex_batch]$Type == "Removal")) %>% 
                         summarise(., 
+                                  `Strain` = unique(`Strain`)[which.max(tabulate(match(`Strain`, unique(`Strain`))))],
                                   `Total Weight Produced` = sum(Weight[Type == 'Entry']),  
-                                  `Total Freeze-Thaws` = mean(`Number of Freeze-Thaws`),
+                                  `Total Weight Used` = sum(Weight[Type == 'Removal']),  
+                                  `Location` = unique(`Location`)[which.max(tabulate(match(`Location`, unique(`Location`))))],
                                   `Group Using Most` = unique(Operator_Group[Type == 'Removal'])[which.max(tabulate(match(Operator_Group, unique(Operator_Group))))],
                                   `Operator Using Most` = unique(Operator[Type == 'Removal'])[which.max(tabulate(match(Operator, unique(Operator))))],
                                   .groups = 'drop') %>% 
                         mutate(., across(.cols = everything(), as.character)) %>% 
                         pivot_longer(., cols = -c(Unique_Bag_ID), names_to = "Statistics", values_to = "Values") %>% 
                         pivot_wider(., names_from = Unique_Bag_ID, values_from = Values), 
-                    rownames = FALSE
+                    rownames = FALSE,
+                    options = list(scrollX = T, pageLength = 8)
                 )
                 
             }
-            
+            #ledger no strain, no batch
+            if(is.null(input$flex_batch) & is.null(input$flex_strain)){
+                output$flex_summary <- DT::renderDataTable( 
+                    get(input$flex_database) %>% 
+                        filter(., if(!is.null(input$filter_values)){
+                          if_any(input$filter_groups, match_selection)
+                          #if_all(input$filter_groups, match_selection)
+                        }else{!is.na(Unique_Bag_ID)}) %>% 
+                        group_by(., PB_Number) %>% 
+                        summarise(., 
+                                  `Strains Available` = unique(Strain),
+                                  .groups = 'drop') %>% 
+                        ungroup() %>% 
+                        mutate(., `Batches Available` = PB_Number) %>% 
+                        select(., `Batches Available`, `Strains Available`),
+                    options = list(scrollX = T, pageLength = 8)
+                )
+            }
             
             fig_flex_batch <- get(input$flex_database) %>% 
                 rowwise() %>% 
@@ -616,6 +774,10 @@ server <- function(input, output, session) {
                 filter(., Type != "Balance") %>% 
                 filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
                        if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
+                filter(., if(!is.null(input$filter_values)){
+                  if_any(input$filter_groups, match_selection)
+                  #if_all(input$filter_groups, match_selection)
+                }else{!is.na(Unique_Bag_ID)}) %>% 
                 plot_ly(., x = ~Date_Added,
                         y = ~Running_Tally,
                         color = ~Type,
@@ -628,18 +790,39 @@ server <- function(input, output, session) {
                                       '</br> Freezer Location: ', Freezer_ID, "_", Shelf_Number,
                                       '</br> Operator: ', Operator,
                                       '</br> Weight: ', Weight,"(g)")
-                        
                         ) %>% 
                 layout(yaxis = list(title = "Weight of Modification"),
-                       xaxis = list(range = c(input$flex_daterange[1], input$flex_daterange[2])))
-            
+                       xaxis = list(
+                                    rangeselector = list(
+                                        buttons = list(
+                                            list(
+                                            count = 3,
+                                            label = "3 mo",
+                                            step = "month",
+                                            stepmode = "backward"),
+                                            list(
+                                                count = 6,
+                                                label = "6 mo",
+                                                step = "month",
+                                                stepmode = "backward"),
+                                            list(
+                                                count = 1,
+                                                label = "1 yr",
+                                                step = "year",
+                                                stepmode = "backward"),
+                                            list(
+                                                count = 1,
+                                                label = "YTD",
+                                                step = "year",
+                                                stepmode = "todate"),
+                                            list(step = "all"))),
+                                    rangeslider = list(type = 'date')
+                                    ))
+                
             output$flex_plot <- renderPlotly(fig_flex_batch)
             
         }  
     })
-    
-    
-    
     # Setting Options ####
     observeEvent(input$reset_databases,{
         if(input$reset_confirmation){
@@ -653,11 +836,10 @@ server <- function(input, output, session) {
                 select(., Date_Added, Type, PB_Number, Bag_Number,
                        Unique_Bag_ID, Weight, Material_Type, Strain, Operator,
                        Operator_Group, Freezer_ID, Shelf_Number, Purpose)
-            
+           
             #Bind modified inventory to ledger and save to ledger.csv
             ledger_db <- bind_rows(ledger_db, inventory_reset_holder)
             write.csv(ledger_db, file = "./app_ledger.csv", row.names = F)
-            
             #create archive_inventory_Date file
             write.csv(inventory_db, file = paste0("./inventory_archive_",Sys.Date(),".csv"), row.names = F)
             
@@ -673,7 +855,6 @@ server <- function(input, output, session) {
                                              Freezer_ID = character(), 
                                              Shelf_Number = numeric(), 
                                              stringsAsFactors = FALSE)
-                
             write.csv(inventory_db_empty, file = "./app_inventory.csv", row.names = F)
             
             # if ledger is reset, save ledger to an archive, create empty DF, overwrite app_ledger.csv
@@ -698,26 +879,13 @@ server <- function(input, output, session) {
                 write.csv(ledger_db_empty, file = "./app_ledger.csv", row.names = F)
                 
             }
-            
+            session$reload()
         }
     })
     
     
-    # Notes #### 
-        #take the ledger data table
-        #graph with line for current amount at that time, and bar for inputs/outputs?
-        # filter for date and strain
-        #Different graphs 
-        # https://www.r-graph-gallery.com/time-series.html
-    # Filter for several strains? Possible?
-    # Weight of current batches in the freezer
-    # number of batches in the freezer, number of bags in the freezer (in text?)
-    # Add table reset option.
-    
-    
-    # End ####
+
 } 
-
-
-# Run the application 
+# End ####
+# Run App #### 
 shinyApp(ui = ui, server = server)
