@@ -72,11 +72,12 @@ ui <- dashboardPage(
                     numericInput(inputId = "sample_weight",
                                label = "Sample Weight (minus bag tare)",
                                value = 1,
-                               min = 1),
+                               min = 1,
+                               step = 100),
                     
                     radioButtons(inputId = "material_type",
                                label = "Type of Material",
-                               choices = c("Pellet","Ferm-Sup")),
+                               choices = c("Solid","Liquid")),
                     
                     selectizeInput(inputId = "strain_id",
                                  label = "Strain ID (PP##)",
@@ -118,7 +119,7 @@ ui <- dashboardPage(
             tabItem(tabName = "batch_mod",
                     h1("Modify a Batch"),
                     dateInput(inputId = "mod_date_action",
-                            label = "Date of Action",
+                            label = "Date of Action (YYMMDD)",
                             format = "yymmdd"),
                     
                     selectInput(inputId = "mod_type",
@@ -148,6 +149,18 @@ ui <- dashboardPage(
                                  selected = NULL,
                                  options = list( create = TRUE,
                                                  createOnBlur = TRUE) ),
+                    
+                    selectizeInput(inputId = "mod_freezer_name",
+                                   label = "Storage Location: Change if needed",
+                                   choices = NULL,
+                                   selected = NULL,
+                                   options = list( create = TRUE,
+                                                   createOnBlur = TRUE)),
+                    
+                    numericInput(inputId = "mod_shelf_number",
+                                label = "Shelf Number: Change if needed",
+                                value = 1,
+                                min = 1),
                     
                     textInput(inputId = "mod_reason",
                               label = "Reason for Change",
@@ -222,7 +235,7 @@ ui <- dashboardPage(
                     fluidRow(
                         tabBox(
                             width = 12,
-                            title = "Run Chart",
+                            title = "Information",
                             side = "right",
                             id = "run_chart",
                             tabPanel("Graph",
@@ -302,17 +315,19 @@ server <- function(input, output, session) {
     #   The process is repeated for the ledger and inventory.
     #   First: the PB and SU are concatenated to save some lines of code later
     #   Second: Lists are created for the ledger/inventory of the information provided
-    #       and some infered from the type of activity (using batch input is always an "Entry"
+    #       and some inferred from the type of activity (using batch input is always an "Entry"
     #       never a removal.)
     #   Third: the list is appended to the existing dataframe, the date column is coerced to prevent
     #       some errors with date formatting in excel.
     #   Fourth: the new dataframe is saved to the pertinent file and the page is refreshed.
     
     observeEvent(input$upload_entry,{
-        
+      
         # standardizes and combines PB and SU selections
-        formatted_PB <- if(!is.null(input_su_checkbox)){
-            paste0(toupper(input$batch_id),"_SU",input$input_su_checkboxes)
+        formatted_PB <- if(!is.null(input$input_su_checkboxes)){
+            paste0(toupper(input$batch_id),
+                   "_SU",
+                   paste0(input$input_su_checkboxes,collapse = ""))
         } else {toupper(input$batch_id)}
         
         # Ledger update, bind and save
@@ -329,16 +344,16 @@ server <- function(input, output, session) {
                              input$freezer_name,
                              input$shelf_number,
                              "Batch Harvest")
-        
+
         ledger_update_db <- rbind(ledger_db, ledger_update_list) %>% 
-            transform(Date_Added = as.character(Date_Added,"%m/%d/%y"))
+            mutate(Date_Added = as.character(Date_Added,"%m/%d/%y"), .keep = "unused" )
         
         write.csv(ledger_update_db, file = "./app_ledger.csv", row.names = F, na = "")
         
         # Inventory update, bind and save
         inventory_update_list <- list(input$date_action,
                                       paste0(formatted_PB,"_",input$bag_number),
-                                      toupper(input$batch_id),
+                                      formatted_PB,
                                       input$bag_number,
                                       toupper(input$strain_id),
                                       input$material_type,
@@ -347,7 +362,7 @@ server <- function(input, output, session) {
                                       input$shelf_number)
 
         inventory_update_db <- rbind(inventory_db, inventory_update_list) %>% 
-            transform(Date_Modified = as.character(Date_Modified,"%m/%d/%y"))
+            mutate(Date_Modified = as.character(Date_Modified,"%m/%d/%y"), .keep = "unused" )
         
         write.csv(inventory_update_db, file = "./app_inventory.csv", row.names = F, na = "")        
         
@@ -375,11 +390,11 @@ server <- function(input, output, session) {
         
         # getting most previous entry to infer information.
         inventory_update_row <- (inventory_db %>%  
-                            filter(., inventory_db$Unique_Bag_ID == input$mod_unique_batch_id) %>% 
-                            split(., seq(nrow(.))))[[1]]
+                            filter(., inventory_db$Unique_Bag_ID == input$mod_unique_batch_id))
+        
         ledger_update_row <- (ledger_db %>% 
-                            filter(., inventory_db$Unique_Bag_ID == input$mod_unique_batch_id) %>% 
-                            split(., seq(nrow(.))))[[1]]
+                            filter(., ledger_db$Unique_Bag_ID == input$mod_unique_batch_id) %>% 
+                            filter(., Date_Added == max(Date_Added)))
         
         # If removing, drop row and change ledger value to negative of weight
         # If setting balance, update the inventory values, bind to inventory db, and update ledger weight.
@@ -392,30 +407,38 @@ server <- function(input, output, session) {
         } else if(input$mod_type == 'Set Balance'){
             inventory_update_row$Date_Modified = input$mod_date_action
             inventory_update_row$Weight = input$mod_value_change
-            
+            inventory_update_row$Freezer_ID = input$mod_freezer_name
+            inventory_update_row$Shelf_Number = input$mod_shelf_number
+              
             inventory_db <- inventory_db %>% subset(.,Unique_Bag_ID != input$mod_unique_batch_id)
             inventory_db <- rbind(inventory_db, inventory_update_row)
             
             ledger_update_row$Weight = input$mod_value_change
             ledger_update_row$Type = "Set Balance"
             
-            
         } else{
             inventory_update_row$Date_Modified = input$mod_date_action
             inventory_update_row$Weight = inventory_update_row$Weight - input$mod_value_change
+            inventory_update_row$Freezer_ID = input$mod_freezer_name
+            inventory_update_row$Shelf_Number = input$mod_shelf_number
+            
             
             inventory_db <- inventory_db %>% subset(.,Unique_Bag_ID != input$mod_unique_batch_id)
             inventory_db <- rbind(inventory_db, inventory_update_row)
             
-            ledger_update_row$Weight = ledger_update_row$Weight - input$mod_value_change
+            ledger_update_row$Weight = input$mod_value_change
             ledger_update_row$Type = "Removal"
         }
+        
         
         # Update ledger values and bind row to dataframe: happens no matter the change.
         ledger_update_row$Date_Added = input$mod_date_action
         ledger_update_row$Operator = input$mod_operator
         ledger_update_row$Operator_Group = input$mod_op_group
+        ledger_update_row$Freezer_ID = input$mod_freezer_name
+        ledger_update_row$Shelf_Number = input$mod_shelf_number
         ledger_update_row$Purpose = input$mod_reason
+       
         
         ledger_db <- rbind(ledger_db, ledger_update_row)
 
@@ -453,6 +476,22 @@ server <- function(input, output, session) {
     updateSelectizeInput(session, "freezer_name",
                          choices = ledger_db$Freezer_ID,
                          selected ="", server = TRUE)
+    
+    observeEvent(input$mod_unique_batch_id,{
+      #Freezers for batch Modification
+      updateSelectizeInput(session,"mod_freezer_name",
+                           choices = ledger_db$Freezer_ID,
+                           selected = inventory_db %>% 
+                             filter(., Unique_Bag_ID == input$mod_unique_batch_id) %>% 
+                             pull(Freezer_ID), server = TRUE)
+      
+      #Freezer Shelf for batch modification
+        updateNumericInput(session, "mod_shelf_number", 
+                         value = as.numeric(inventory_db %>% 
+                           filter(., Unique_Bag_ID == input$mod_unique_batch_id) %>% 
+                           pull(Shelf_Number) ))
+    })
+    
     #Operator Group batch modifications
     updateSelectizeInput(session, "mod_op_group",
                          choices = ledger_db$Operator_Group,
@@ -489,7 +528,7 @@ server <- function(input, output, session) {
                     selected = "",
                     server = TRUE
                 )
-                print("updated strain to new database")
+                
             } else(
                 updateSelectizeInput(
                     session,
@@ -730,7 +769,7 @@ server <- function(input, output, session) {
             )
             
             # Summary table of Ledger by Strain
-            if(!is.null(input$flex_strain)){ 
+            if(!is.null(input$flex_strain) & is.null(input$flex_batch)){ 
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
                         filter(., Strain %in% input$flex_strain) %>% 
@@ -782,7 +821,11 @@ server <- function(input, output, session) {
                         summarise(., 
                                   `Strain` = unique(`Strain`)[which.max(tabulate(match(`Strain`, unique(`Strain`))))],
                                   `Total Weight Produced` = sum(Weight[Type == 'Entry']),  
-                                  `Total Weight Used` = sum(Weight[Type == 'Removal']),  
+                                  `Total Weight Used` = sum(Weight[Type == 'Removal']),
+                                  `Weight Remaining` = sum(Weight[Type == 'Entry']) - sum(Weight[Type == 'Removal']),
+                                  `Time in Freezer` = if(sum(Weight[Type == 'Entry']) - sum(Weight[Type == 'Removal']) == 0){
+                                    difftime(max(`Date_Added`), min(`Date_Added`), units = c('days')) 
+                                    } else {difftime(Sys.Date(), min(`Date_Added`), units = c('days'))},
                                   `Location` = unique(`Location`)[which.max(tabulate(match(`Location`, unique(`Location`))))],
                                   `Group Using Most` = unique(Operator_Group[Type == 'Removal'])[which.max(tabulate(match(Operator_Group, unique(Operator_Group))))],
                                   `Operator Using Most` = unique(Operator[Type == 'Removal'])[which.max(tabulate(match(Operator, unique(Operator))))],
