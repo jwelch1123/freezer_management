@@ -11,6 +11,7 @@ library(RColorBrewer)
 ui <- dashboardPage(
     skin = 'black',
     # Header & Sidebar ####
+    # Includes title, sidebar and icons.
     dashboardHeader(title = "Cell Paste Database"),
     dashboardSidebar( id = "", 
         sidebarMenu(
@@ -21,10 +22,13 @@ ui <- dashboardPage(
             menuItem("Settings",tabName = 'settings',icon = icon('cog'))
         )
     ),
-    # Body and Items ####
+    # Body & Items ####
     dashboardBody(
         tabItems(
             # Inventory & Ledger ####
+            #   Static Tables which are there for reference
+            #   table_type switches between the displayed tables 
+            #   Tables are rendered under header "Render Static Tables"
             tabItem(tabName = "inventory_ledger",
                 fluidRow(
                 column(width = 11,
@@ -33,12 +37,17 @@ ui <- dashboardPage(
                     selectInput(
                         inputId = "table_type",
                         label = "Select table to View: ",
-                        choices = c("Current Inventory", "Overall Ledger"),
+                        choices = c("Current Inventory" = "inventory_db",
+                                    "Overall Ledger" = "ledger_db"),
                         selected = "Current Inventory"),
                     dataTableOutput("selected_table")
                 )
             )), 
             # Batch Input ####
+            #   For users who are submitting a new batch to the database
+            #   All relevant pieces of information are collected from the operator
+            #   Drop down menu's help with filling in routine information but allow 
+            #   new entries. Stored to ledger and inventory when submitted
             tabItem(tabName = "batch_input",
                     h1("Input at New Batch"),
                     br(),
@@ -102,6 +111,10 @@ ui <- dashboardPage(
                     br()
             ),
             # Batch Modification ####
+            #   For users who are changing a batch by setting or removing weight
+            #   Unique Bag ID is used to pull other information not entered.
+            #   Most information entered gets entered into the ledger.
+            #   Date, weight, and location are updated in the inventory as well.
             tabItem(tabName = "batch_mod",
                     h1("Modify a Batch"),
                     dateInput(inputId = "mod_date_action",
@@ -152,6 +165,11 @@ ui <- dashboardPage(
             ),
             
             # Viewer ####
+            #   This is the generalized viewing page. You can select Inventory or Ledger
+            #   This determines the data base used and graphs/tables presented.
+            #   You can also select Strains and Batches to filter the viewer
+            #   To further filter viewing, you can select other features of the data set
+            #   dependent on which is selected, and then filter for values of that data.
             tabItem(tabName = "flex_page",
                     h1("Strain and Batch Viewer"),
                     fluidRow(
@@ -216,6 +234,9 @@ ui <- dashboardPage(
             ),
             
             # Settings ####
+            #   This page exists for 1 edge case though may be needed for others later.
+            #   The Inventory and ledger can be reset, generally this will only be used for the inventory
+            #   To reset the data bases you need to select a checkbox to confirm.
             tabItem(tabName = 'settings',
                     h1("Settings"),
                     h3("Database Reset"),
@@ -252,7 +273,10 @@ ui <- dashboardPage(
 # Shiny App Server ####
 server <- function(input, output, session) {
   
-    # Import statements ####
+    # Import Statements ####
+    #   Get inventory and ledger from local directory
+    #   Column types are coerced to prevent some errors.
+    #   Should include a 'non csv' catcher as that might be a large issue. 
     inventory_db <- read_csv("./app_inventory.csv",
                              col_types = "cccnccncn") %>% 
         transform(Date_Modified = as.Date(Date_Modified,"%m/%d/%y"))
@@ -263,26 +287,35 @@ server <- function(input, output, session) {
         transform(Date_Added = as.Date(Date_Added, "%m/%d/%y"))
     
     # Render Static Tables ####
+    #   This is the output for the static tables on the "Inventory & Ledger" page
+    #   Options are to deal with some issues regarding page width
     observeEvent(input$table_type, {
         output$selected_table <- DT::renderDataTable(
-          options = list(autoWidth = FALSE,
-                         scrollX = T),{
-            if(input$table_type == "Current Inventory"){
-                inventory_db
-            } else if (input$table_type == "Overall Ledger"){
-                ledger_db
-            }  }
+                options = list(autoWidth = FALSE, scrollX = T),{get(input$table_type)}
             )
     })
     
     
-    # Entry update ####
+    # Input Update ####
+    #   This covers the updates to inventory and ledger when a new batch is entered via
+    #     the "batch input" page. 
+    #   The process is repeated for the ledger and inventory.
+    #   First: the PB and SU are concatenated to save some lines of code later
+    #   Second: Lists are created for the ledger/inventory of the information provided
+    #       and some infered from the type of activity (using batch input is always an "Entry"
+    #       never a removal.)
+    #   Third: the list is appended to the existing dataframe, the date column is coerced to prevent
+    #       some errors with date formatting in excel.
+    #   Fourth: the new dataframe is saved to the pertinent file and the page is refreshed.
+    
     observeEvent(input$upload_entry,{
         
+        # standardizes and combines PB and SU selections
         formatted_PB <- if(!is.null(input_su_checkbox)){
             paste0(toupper(input$batch_id),"_SU",input$input_su_checkboxes)
         } else {toupper(input$batch_id)}
         
+        # Ledger update, bind and save
         ledger_update_list <- list(input$date_action,
                              "Entry",
                              formatted_PB,
@@ -301,7 +334,8 @@ server <- function(input, output, session) {
             transform(Date_Added = as.character(Date_Added,"%m/%d/%y"))
         
         write.csv(ledger_update_db, file = "./app_ledger.csv", row.names = F, na = "")
-    
+        
+        # Inventory update, bind and save
         inventory_update_list <- list(input$date_action,
                                       paste0(formatted_PB,"_",input$bag_number),
                                       toupper(input$batch_id),
@@ -317,18 +351,29 @@ server <- function(input, output, session) {
         
         write.csv(inventory_update_db, file = "./app_inventory.csv", row.names = F, na = "")        
         
+        # Session is re-loaded to make it look like something 
+        #   happened and refresh views of inventory
         session$reload()
     
     })
     
     # Modification Update ####
+    #   Following a similar pattern as the Entry Update section above...
+    #   First: there is an attempt to catch invalid unique bag IDs and reload the session to 
+    #     prevent erroneous database changes.
+    #   Second: The unique or most recent entries for the Unique ID are stored from each database
+    #   Third: Consider the type of action taken, if the batch is being removed, the balance set, or a simple removal
+    #     different updates are preformed on the row to update.
+    #   Fourth: some metadata values are updated: date, operator, group, purpose...
+    #   Fifth: new rows are bound to existing dataframe and saved to csv files.
     observeEvent(input$mod_update_entry,{
         
         # Catches empty submissions so they don't get uploaded to database
-        if(input$mod_unique_batch_id == ""){
+        if(!(input$mod_unique_batch_id %in% inventory_db$Unique_Bag_ID)){
             session$reload()
         }
         
+        # getting most previous entry to infer information.
         inventory_update_row <- (inventory_db %>%  
                             filter(., inventory_db$Unique_Bag_ID == input$mod_unique_batch_id) %>% 
                             split(., seq(nrow(.))))[[1]]
@@ -337,7 +382,8 @@ server <- function(input, output, session) {
                             split(., seq(nrow(.))))[[1]]
         
         # If removing, drop row and change ledger value to negative of weight
-        # If not removing, update the inventory values, bind to inventory db, and update ledger weight.
+        # If setting balance, update the inventory values, bind to inventory db, and update ledger weight.
+        # If a simple removal, update the inventory values, bind to inventory db, and update ledger weight. 
         if({input$mod_remove_unique_id}){ 
             inventory_db <- inventory_db %>% subset(.,Unique_Bag_ID != input$mod_unique_batch_id)
             ledger_update_row$Weight = 0 - ledger_update_row$Weight
@@ -377,11 +423,15 @@ server <- function(input, output, session) {
         write.csv(inventory_db, file = "./app_inventory.csv", row.names = F)
         write.csv(ledger_db, file = "./app_ledger.csv", row.names = F)
         
+        # session reloaded to give apperence of submission and reload visualizations
         session$reload()
     })
     
     # Selectize Updates ####
-    
+    #   This is a list of Selectize updates for the Batch Input/Modification
+    #   Also near the bottom are the Viewer page updates which are triggered and
+    #     conditional based on other selected values.
+    #   The filters refer to the 'other data' which can be selected from a drop down list
     # list of all previous strains
     updateSelectizeInput(session, "strain_id", 
                          choices = ledger_db$Strain, 
@@ -407,10 +457,10 @@ server <- function(input, output, session) {
     updateSelectizeInput(session, "mod_op_group",
                          choices = ledger_db$Operator_Group,
                          selected ="", server = TRUE)
-    
+  
     ## Update Viewer Page Selections
     # updates batch/strain when database is changed
-    observeEvent(input$flex_database, { #needs to update choices when filled?
+    observeEvent(input$flex_database, {
         if (!is.null(input$flex_batch)) {
             if (!(input$flex_batch %in% get(input$flex_database)$PB_Number)) {
                 updateSelectizeInput(
@@ -431,7 +481,6 @@ server <- function(input, output, session) {
             )
         }
         if (!is.null(input$flex_strain)) {
-            print("strain not null")
             if (!(input$flex_strain %in% get(input$flex_database)$Strain)) {
                 updateSelectizeInput(
                     session,
@@ -481,29 +530,13 @@ server <- function(input, output, session) {
                     !is.na(PB_Number)
                 }) %>%
                 pull(PB_Number),
+            #selected = input$flex_batch,
             selected = "",
             server = TRUE
         )
     }, ignoreNULL = F)
     
-    # update Strain when batch is changed
-    observeEvent(input$flex_batch, {
-        updateSelectizeInput(
-            session,
-            "flex_strain",
-            choices = get(input$flex_database) %>%
-                filter(., if (!is.null(input$flex_batch)) {
-                    `PB_Number` %in% input$flex_batch
-                } else {
-                    !is.na(Strain)
-                }) %>%
-                pull(Strain),
-            selected = "",
-            server = TRUE
-        )
-    }, ignoreNULL = F)
-    
-    # update filters
+    # update filter groups based on database
     observeEvent(input$flex_database,{
       
             updateSelectizeInput(session,
@@ -523,6 +556,7 @@ server <- function(input, output, session) {
                                  server = TRUE)
     })
 
+    # Update filter values based on database and filter groups selected for
     observeEvent(c(input$flex_database,input$filter_groups),{
         filter_value_choices <- c()
         for(x in input$filter_groups){
@@ -536,15 +570,30 @@ server <- function(input, output, session) {
     })
     
     # Flex Page Graphics ####
+    #   This contains the outputs for all the displays on the Viewer page.
+    #   First we define a helper function to help our filtering over multiple columns.
+    #   Then we observe Strain/Batch/filter_values and the database
+    #   When if Strain/Batch/fitler_values change, a filter is applied to the presented data
+    #   If database is changed, a different set of graphs is displayed 
+    #   The Inventory and Ledger displays follow the same format
+    #     The flex_table (same box as graph) is rendered
+    #     Then depending of if Strain or batch have values, different statistics are shown
+    #       (by strain, by batch, or neither) in the top right box (summary table)
+    #     Finally, the graph is rendered, in the inventory it is a bar plot, in ledger
+    #       a run chart.
     
+    
+    # this is a helper function to filter for rows of X which are within input$filter_values list
+    # it is used in many of the filter functions in this app. 
     match_selection <- function(x) {
       return(x %in% input$filter_values)
     }
     
+    # two mirrored updates depending on the database being used.
     observeEvent(c(input$flex_strain, input$flex_batch, input$flex_database, input$filter_values, input$filter_groups),{
 
         if(input$flex_database == "inventory_db"){
-
+            # Table of batches matching description, behind graph
             output$flex_table <- DT::renderDataTable(
                 options = list(autoWidth = FALSE),
                 {
@@ -561,7 +610,7 @@ server <- function(input, output, session) {
                 }
             )
     
-            # Inventory_by_Strain
+            # Summary Table Inventory_by_Strain
             if(!is.null(input$flex_strain)){
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
@@ -591,7 +640,7 @@ server <- function(input, output, session) {
                     options = list(scrollX = T, pageLength = 8)
                 )
             } 
-            # Inventory_by_batch
+            # Summary Table Inventory_by_batch
             if(!is.null(input$flex_batch)){
                 
                 output$flex_summary <- DT::renderDataTable( 
@@ -619,7 +668,7 @@ server <- function(input, output, session) {
                     options = list(scrollX = T, pageLength = 8)
                 )
             }
-            #Inventory, no strain, no batch
+            #Summary Table Inventory when no selected strain or batch
             if(is.null(input$flex_batch) & is.null(input$flex_strain)){
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
@@ -636,6 +685,7 @@ server <- function(input, output, session) {
                 )
             }
             
+            # Graph for inventory based on selected filters
             fig_flex_strain <-  get(input$flex_database) %>%
                 rowwise() %>%
                 filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
@@ -665,6 +715,7 @@ server <- function(input, output, session) {
             
         } else if(input$flex_database == "ledger_db"){
             
+            # Table of batches matching filters (behind graph)
             output$flex_table <- DT::renderDataTable(
                 get(input$flex_database) %>% 
                     filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
@@ -678,7 +729,7 @@ server <- function(input, output, session) {
                 
             )
             
-            # Ledger by Strain
+            # Summary table of Ledger by Strain
             if(!is.null(input$flex_strain)){ 
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
@@ -716,7 +767,7 @@ server <- function(input, output, session) {
                 
                 
             } 
-            # Ledger by batch
+            # Summary table of Ledger by batch
             if(!is.null(input$flex_batch)){ 
                 
                 output$flex_summary <- DT::renderDataTable( 
@@ -744,7 +795,7 @@ server <- function(input, output, session) {
                 )
                 
             }
-            #ledger no strain, no batch
+            # Summary table of ledger when neither batch or strain is selected
             if(is.null(input$flex_batch) & is.null(input$flex_strain)){
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
@@ -763,6 +814,7 @@ server <- function(input, output, session) {
                 )
             }
             
+            # Graph of ledger with filters applied.
             fig_flex_batch <- get(input$flex_database) %>% 
                 rowwise() %>% 
                 mutate(., Running_Tally = 
@@ -823,7 +875,18 @@ server <- function(input, output, session) {
             
         }  
     })
-    # Setting Options ####
+    
+    # Setting Updates ####
+    #   This contains the events for the Settings page.
+    #   If the reset_databases button is pressed and the confirmation is selected
+    #   First: the inventory is slightly modified so it can be appended to the ledger
+    #     this includes renaming and ordering columns, and assining certain values
+    #   Second: the modified inventory is bound to the ledger and saved to the ledger
+    #   Third: a archieve of the inventory is created and labeled with the current date
+    #   Fourth: an empty inventory is created and saved to the app_inventory.csv location
+    #   Fifth: if the ledger was selected to be reset, create and save an archive, 
+    #     create an empty ledger_database, and save to the app_ledger.csv location.
+    #   Finally: the session is reloaded to show a change has been made. 
     observeEvent(input$reset_databases,{
         if(input$reset_confirmation){
             #Create data frame to hold modified inventory_db
