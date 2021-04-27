@@ -213,18 +213,11 @@ ui <- dashboardPage(
                                        multiple = TRUE
                                    ),
                                    selectizeInput(
-                                       inputId = "filter_groups",
-                                       label = "Select Group to Filter",
-                                       choices = NULL,
-                                       selected = NULL,
-                                       multiple = TRUE
-                                   ),
-                                   selectizeInput(
-                                       inputId = "filter_values",
-                                       label = "Select Values to Filter",
-                                       choices = NULL,
-                                       selected = NULL,
-                                       multiple = TRUE
+                                     inputId = "flex_filter",
+                                     label = "Select Values to Filter By",
+                                     choices = NULL,
+                                     selected = NULL,
+                                     multiple = TRUE
                                    ),
                                ),
                                box(title = "Quick Look",
@@ -292,12 +285,11 @@ server <- function(input, output, session) {
     #   Should include a 'non csv' catcher as that might be a large issue. 
     inventory_db <- read_csv("./app_inventory.csv",
                              col_types = "cccnccncn") %>% 
-        transform(Date_Modified = as.Date(Date_Modified,"%m/%d/%y"))
-    
+        transform(Date_Modified = as.Date(Date_Modified,"%m/%d/%Y"))
     
     ledger_db <- read_csv("./app_ledger.csv",
                           col_types = "cccncncccccnc") %>% 
-        transform(Date_Added = as.Date(Date_Added, "%m/%d/%y"))
+        transform(Date_Added = as.Date(Date_Added, "%m/%d/%Y"))
     
     # Render Static Tables ####
     #   This is the output for the static tables on the "Inventory & Ledger" page
@@ -575,44 +567,42 @@ server <- function(input, output, session) {
         )
     }, ignoreNULL = F)
     
-    # update filter groups based on database
-    observeEvent(input$flex_database,{
+    
+    # Depending on the database chosen, display the unique values for each column with 
+    #  the column name as the header (manually entered). This always nice visualization 
+    #  but is sensitive to identical data accross multiple columns.
+    observeEvent(input$flex_database, {
       
-            updateSelectizeInput(session,
-                                 "filter_groups",
-                                 choices = if (input$flex_database == "inventory_db"){
-                                     c("Material Type" = "Material_Type",
-                                       "Freezer" = "Freezer_ID")
-                                 }else{
-                                     c(
-                                         "Modification Type" = "Type",
-                                         "Material Type" = "Material_Type",
-                                         "Operator",
-                                         "Operator Group" = "Operator_Group",
-                                         "Freezer" = "Freezer_ID"
-                                     )},
-                                 selected = "",
-                                 server = TRUE)
-    })
+      if (input$flex_database == "inventory_db") {
+        alt_filter_options = list(
+          "Material Type" = sort(unique(get(input$flex_database)$Material_Type)),
+          "Freezer ID" = sort(unique(get(input$flex_database)$Freezer_ID))
+          )
 
-    # Update filter values based on database and filter groups selected for
-    observeEvent(c(input$flex_database,input$filter_groups),{
-        filter_value_choices <- c()
-        for(x in input$filter_groups){
-            filter_value_choices <- append(filter_value_choices,unique(get(input$flex_database) %>% pull(x)))
-        }
-        updateSelectizeInput(session,
-                             "filter_values",
-                             choices = filter_value_choices,
-                             selected = "",
-                             server = TRUE)
+      } else if (input$flex_database == "ledger_db") {
+        alt_filter_options = list(
+          "Type" = sort(unique(get(input$flex_database)$Type)),
+          "Material Type" = sort(unique(get(input$flex_database)$Material_Type)),
+          "Operator" = sort(unique(get(input$flex_database)$Operator)),
+          "Operator Group" = sort(unique(get(input$flex_database)$Operator_Group)),
+          "Freezer ID" = sort(unique(get(input$flex_database)$Freezer_ID))
+        )
+      }
+      
+      updateSelectInput(
+        session,
+        "flex_filter",
+        choices = alt_filter_options)
+      
+      #print(alt_filter_options$`Material Type`)
+      #print(names(alt_filter_options))
     })
     
     # Flex Page Graphics ####
     #   This contains the outputs for all the displays on the Viewer page.
     #   First we define a helper function to help our filtering over multiple columns.
-    #   Then we observe Strain/Batch/filter_values and the database
-    #   When if Strain/Batch/fitler_values change, a filter is applied to the presented data
+    #   Then we observe Strain/Batch/Filter and the database
+    #   When if Strain/Batch/Filter change, a filter is applied to the presented data
     #   If database is changed, a different set of graphs is displayed 
     #   The Inventory and Ledger displays follow the same format
     #     The flex_table (same box as graph) is rendered
@@ -622,16 +612,17 @@ server <- function(input, output, session) {
     #       a run chart.
     
     
-    # this is a helper function to filter for rows of X which are within input$filter_values list
-    # it is used in many of the filter functions in this app. 
+    # this is a helper function to filter for rows of X which are within input$flex_filter list
+    # it is used in many of the filter functions in this app. This implementation is sensitive to identical data in multiple columns.
     match_selection <- function(x) {
-      return(x %in% input$filter_values)
+      return(if (!any(x %in% input$flex_filter)){T} else{x %in% input$flex_filter})
     }
     
     # two mirrored updates depending on the database being used.
-    observeEvent(c(input$flex_strain, input$flex_batch, input$flex_database, input$filter_values, input$filter_groups),{
+    observeEvent(c(input$flex_filter, input$flex_strain, input$flex_batch, input$flex_database),{
 
         if(input$flex_database == "inventory_db"){
+          
             # Table of batches matching description, behind graph
             output$flex_table <- DT::renderDataTable(
                 options = list(autoWidth = FALSE),
@@ -640,9 +631,8 @@ server <- function(input, output, session) {
                     filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
                            if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}
                            ) %>% 
-                    filter(., if(!is.null(input$filter_values)){
-                      if_any(input$filter_groups, match_selection)
-                      #if_all(input$filter_groups, match_selection)
+                    filter(., if(!is.null(input$flex_filter)){
+                      across(everything(), match_selection)
                       }else{!is.na(Unique_Bag_ID)}) %>% 
                     mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
                     select(., Unique_Bag_ID,Date_Modified, Weight, Material_Type, Location)
@@ -654,9 +644,8 @@ server <- function(input, output, session) {
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
                         filter(., Strain %in% input$flex_strain) %>% 
-                        filter(., if(!is.null(input$filter_values)){
-                          if_any(input$filter_groups, match_selection)
-                          #if_all(input$filter_groups, match_selection)
+                        filter(., if(!is.null(input$flex_filter)){
+                          across(everything(), match_selection)
                           }else{!is.na(Unique_Bag_ID)}) %>% 
                         group_by(., Strain) %>% 
                         mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" ) ) %>%
@@ -676,7 +665,7 @@ server <- function(input, output, session) {
                                     names_from = `Strain` ,
                                     values_from = `Value`),
                     rownames = FALSE,
-                    options = list(scrollX = T, pageLength = 8)
+                    options = list(scrollX = T, pageLength = 6)
                 )
             } 
             # Summary Table Inventory_by_batch
@@ -685,9 +674,8 @@ server <- function(input, output, session) {
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
                         filter(., PB_Number %in% input$flex_batch) %>%
-                        filter(., if(!is.null(input$filter_values)){
-                          if_any(input$filter_groups, match_selection)
-                          #if_all(input$filter_groups, match_selection)
+                        filter(., if(!is.null(input$flex_filter)){
+                          across(everything(), match_selection)
                         }else{!is.na(Unique_Bag_ID)}) %>% 
                         mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
                         group_by(., Unique_Bag_ID) %>% 
@@ -704,35 +692,34 @@ server <- function(input, output, session) {
                         pivot_longer(., cols = -c(Unique_Bag_ID), names_to = "Statistics", values_to = "Values") %>% 
                         pivot_wider(., names_from = Unique_Bag_ID, values_from = Values),
                     rownames = FALSE,
-                    options = list(scrollX = T, pageLength = 8)
+                    options = list(scrollX = T, pageLength = 6)
                 )
             }
             #Summary Table Inventory when no selected strain or batch
             if(is.null(input$flex_batch) & is.null(input$flex_strain)){
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
-                      filter(., if(!is.null(input$filter_values)){
-                        if_any(input$filter_groups, match_selection)
-                        #if_all(input$filter_groups, match_selection)
+                      filter(., if(!is.null(input$flex_filter)){
+                        across(everything(), match_selection)
                       }else{!is.na(Unique_Bag_ID)}) %>% 
                         group_by(., PB_Number) %>% 
                         summarise(., 
                                   `Strains Available` = unique(Strain),
                                   `Total Weight Avalible` = sum(Weight),
                                   .groups = 'drop'),
-                    options = list(scrollX = T, pageLength = 8)
+                    options = list(scrollX = T, pageLength = 6)
                 )
             }
             
             # Graph for inventory based on selected filters
-            fig_flex_strain <-  get(input$flex_database) %>%
+            fig_flex_inventory <-  get(input$flex_database) %>%
+                filter(., if(!is.null(input$flex_filter)){
+                  across(everything(), match_selection)
+                }else{!is.na(Unique_Bag_ID)}) %>% 
                 rowwise() %>%
                 filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
                        if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
-                filter(., if(!is.null(input$filter_values)){
-                  if_any(input$filter_groups, match_selection)
-                  #if_all(input$filter_groups, match_selection)
-                }else{!is.na(Unique_Bag_ID)}) %>% 
+
                 plot_ly(., x = if(is.null(input$flex_batch)) ~Strain else ~PB_Number, 
                         y = ~Weight, 
                         color = if(is.null(input$flex_batch)) ~PB_Number else ~as.factor(Bag_Number), 
@@ -747,7 +734,7 @@ server <- function(input, output, session) {
                         ) %>% 
                 layout(yaxis = list(title = "Weight of Material (g)"), barmode = 'stack')
             
-            output$flex_plot <- renderPlotly(fig_flex_strain)
+            output$flex_plot <- renderPlotly({fig_flex_inventory})
 
         
             
@@ -759,9 +746,8 @@ server <- function(input, output, session) {
                 get(input$flex_database) %>% 
                     filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
                            if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
-                    filter(., if(!is.null(input$filter_values)){
-                      if_any(input$filter_groups, match_selection)
-                      #if_all(input$filter_groups, match_selection)
+                    filter(., if(!is.null(input$flex_filter)){
+                      across(everything(), match_selection)
                     }else{!is.na(Unique_Bag_ID)}) %>% 
                     mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
                     select(., Unique_Bag_ID, Strain, Type, Weight, Material_Type, Location, Operator, Operator_Group, Purpose)
@@ -773,9 +759,8 @@ server <- function(input, output, session) {
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
                         filter(., Strain %in% input$flex_strain) %>% 
-                        filter(., if(!is.null(input$filter_values)){
-                          if_any(input$filter_groups, match_selection)
-                          #if_all(input$filter_groups, match_selection)
+                        filter(., if(!is.null(input$flex_filter)){
+                          across(everything(), match_selection)
                         }else{!is.na(Unique_Bag_ID)}) %>% 
                         group_by(., Strain) %>% 
                         mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
@@ -800,7 +785,7 @@ server <- function(input, output, session) {
                                     names_from = `Strain` ,
                                     values_from = `Value`),
                     rownames = FALSE,
-                    options = list(scrollX = T, pageLength = 8)
+                    options = list(scrollX = T, pageLength = 6)
                     
                 )
                 
@@ -812,9 +797,8 @@ server <- function(input, output, session) {
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
                         filter(., PB_Number %in% input$flex_batch) %>% 
-                        filter(., if(!is.null(input$filter_values)){
-                          if_any(input$filter_groups, match_selection)
-                          #if_all(input$filter_groups, match_selection)
+                        filter(., if(!is.null(input$flex_filter)){
+                          across(everything(), match_selection)
                         }else{!is.na(Unique_Bag_ID)}) %>% 
                         mutate(., Location = paste(Freezer_ID,Shelf_Number,sep = "_" )) %>% 
                         group_by(., Unique_Bag_ID) %>% 
@@ -823,9 +807,10 @@ server <- function(input, output, session) {
                                   `Total Weight Produced` = sum(Weight[Type == 'Entry']),  
                                   `Total Weight Used` = sum(Weight[Type == 'Removal']),
                                   `Weight Remaining` = sum(Weight[Type == 'Entry']) - sum(Weight[Type == 'Removal']),
+                                  
                                   `Time in Freezer` = if(sum(Weight[Type == 'Entry']) - sum(Weight[Type == 'Removal']) == 0){
-                                    difftime(max(`Date_Added`), min(`Date_Added`), units = c('days')) 
-                                    } else {difftime(Sys.Date(), min(`Date_Added`), units = c('days'))},
+                                    paste(difftime(max(`Date_Added`), min(`Date_Added`), units = c('days')), "days")
+                                    } else {paste(difftime(Sys.Date(), min(`Date_Added`), units = c('days')), "days")},
                                   `Location` = unique(`Location`)[which.max(tabulate(match(`Location`, unique(`Location`))))],
                                   `Group Using Most` = unique(Operator_Group[Type == 'Removal'])[which.max(tabulate(match(Operator_Group, unique(Operator_Group))))],
                                   `Operator Using Most` = unique(Operator[Type == 'Removal'])[which.max(tabulate(match(Operator, unique(Operator))))],
@@ -834,7 +819,7 @@ server <- function(input, output, session) {
                         pivot_longer(., cols = -c(Unique_Bag_ID), names_to = "Statistics", values_to = "Values") %>% 
                         pivot_wider(., names_from = Unique_Bag_ID, values_from = Values), 
                     rownames = FALSE,
-                    options = list(scrollX = T, pageLength = 8)
+                    options = list(scrollX = T, pageLength = 6)
                 )
                 
             }
@@ -842,9 +827,8 @@ server <- function(input, output, session) {
             if(is.null(input$flex_batch) & is.null(input$flex_strain)){
                 output$flex_summary <- DT::renderDataTable( 
                     get(input$flex_database) %>% 
-                        filter(., if(!is.null(input$filter_values)){
-                          if_any(input$filter_groups, match_selection)
-                          #if_all(input$filter_groups, match_selection)
+                        filter(., if(!is.null(input$flex_filter)){
+                          across(everything(), match_selection)
                         }else{!is.na(Unique_Bag_ID)}) %>% 
                         group_by(., PB_Number) %>% 
                         summarise(., 
@@ -853,26 +837,26 @@ server <- function(input, output, session) {
                         ungroup() %>% 
                         mutate(., `Batches Available` = PB_Number) %>% 
                         select(., `Batches Available`, `Strains Available`),
-                    options = list(scrollX = T, pageLength = 8)
+                    options = list(scrollX = T, pageLength = 6)
                 )
             }
             
             # Graph of ledger with filters applied.
-            fig_flex_batch <- get(input$flex_database) %>% 
-                rowwise() %>% 
-                mutate(., Running_Tally = 
+            fig_flex_ledger <- get(input$flex_database) %>%
+                filter(., if(!is.null(input$flex_filter)){
+                  across(everything(), match_selection)
+                }else{!is.na(Unique_Bag_ID)}) %>%
+                rowwise() %>%
+                mutate(., Running_Tally =
                            if(Type == "Entry"){
                                Weight * 1
                            } else if(Type =="Removal") {
                                Weight * -1
-                           } else {0}) %>% 
-                filter(., Type != "Balance") %>% 
+                           } else {0}) %>%
+                filter(., Type != "Balance") %>%
                 filter(.,if(!is.null(input$flex_strain)){ Strain %in% input$flex_strain}else{!is.na(Strain)},
-                       if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>% 
-                filter(., if(!is.null(input$filter_values)){
-                  if_any(input$filter_groups, match_selection)
-                  #if_all(input$filter_groups, match_selection)
-                }else{!is.na(Unique_Bag_ID)}) %>% 
+                       if(!is.null(input$flex_batch)){PB_Number %in% input$flex_batch}else{!is.na(PB_Number)}) %>%
+                
                 plot_ly(., x = ~Date_Added,
                         y = ~Running_Tally,
                         color = ~Type,
@@ -881,11 +865,11 @@ server <- function(input, output, session) {
                         marker = list(line = list(width = 1, color = "#000000")),
                         hoverinfo = 'text',
                         text = ~paste('</br> Date of Action: ', Date_Added,
-                                      '</br> Unique_ID: ', Unique_Bag_ID, 
+                                      '</br> Unique_ID: ', Unique_Bag_ID,
                                       '</br> Freezer Location: ', Freezer_ID, "_", Shelf_Number,
                                       '</br> Operator: ', Operator,
                                       '</br> Weight: ', Weight,"(g)")
-                        ) %>% 
+                        ) %>%
                 layout(yaxis = list(title = "Weight of Modification"),
                        xaxis = list(
                                     rangeselector = list(
@@ -913,8 +897,10 @@ server <- function(input, output, session) {
                                             list(step = "all"))),
                                     rangeslider = list(type = 'date')
                                     ))
-                
-            output$flex_plot <- renderPlotly(fig_flex_batch)
+
+          output$flex_plot <- renderPlotly({fig_flex_ledger})
+            
+
             
         }  
     })
