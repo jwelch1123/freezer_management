@@ -1,6 +1,12 @@
 # cellpaste_db
 ## Database entry and visualization app for cell pastes
 
+[Write Up](https://nycdatascience.com/blog/student-works/a-shiny-app-for-freezer-management/
+)
+
+[Explore the App](http://jwelch1123.shinyapps.io/freezer_management 
+)
+
 ### Purpose:
 At the company where I work, we routinely produce material which is used in experimental and production workflows. Multiple types of material  exists (given the label PP###) and it is utilized for a variety of purposes by different groups at the company. This material can come from one-or-more of 6 lines and after harvest is stored in bags, and placed in one of several freezers. Each bag is unique, containing that specific batch (produced on a date from lines 1-6), of a label PP###, and a specific weight. Our current solution is an excel sheet where additions and removals are manually tracked, this leads to many errors where material is misplaced or not updated leading to an inaccurate assessment of our inventory. 
   
